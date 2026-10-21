@@ -1,0 +1,24 @@
+name: Bug report
+description: Something in the dashboard, collector or stats card is wrong
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste real prompts, paths, tokens or raw history. Aggregate numbers are fine.
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options: [Codex, Claude Code, Cursor, Antigravity, Not provider specific]
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected and what happened
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version, Node version, OS

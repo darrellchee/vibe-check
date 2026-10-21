@@ -1,0 +1,37 @@
+{
+  "name": "codex-atlas",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "collect": "tsx scripts/collect.ts",
+    "sync": "tsx scripts/sync.ts",
+    "lint": "eslint .",
+    "collector:install": "tsx scripts/collector-service.ts install",
+    "collector:status": "tsx scripts/collector-service.ts status",
+    "collector:uninstall": "tsx scripts/collector-service.ts uninstall"
+  },
+  "dependencies": {
+    "next": "16.4.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "recharts": "3.10.1",
+    "lucide-react": "1.59.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "@types/node": "^24",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "tsx": "^4",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.2"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

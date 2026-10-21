@@ -1,0 +1,12 @@
+node_modules/
+.next/
+.env*
+!.env.example
+data/
+*.tsbuildinfo
+.DS_Store
+.vercel/
+next-env.d.ts
+
+# Documentation and internal notes stay local (README.md is already tracked, so it is unaffected)
+*.md

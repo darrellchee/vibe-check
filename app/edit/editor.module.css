@@ -1,0 +1,957 @@
+/* README editor. Layered on the GitHub profile scope (profile.module.css), which supplies the
+   --bg/--fg/--muted/--border/--link variables on its .root element. */
+
+.page {
+  min-height: 100vh;
+  background: #0d1117;
+  /* `clip` (unlike `hidden`) never creates a scroll container, so the sticky board keeps working. */
+  overflow-x: clip;
+  color-scheme: dark;
+}
+.appbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #30342a;
+  background: #141612;
+}
+.appbar > :global(.provider-switch) {
+  min-width: 0;
+}
+.brand {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  color: #b7ea76;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+
+/* ───────── Cards (README + Publish) ───────── */
+.card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.card + .card {
+  margin-top: 24px;
+}
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 49px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  border-radius: 6px 6px 0 0;
+  background: #151b23;
+}
+.title {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 18px;
+}
+.cardTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.body {
+  padding: 24px;
+}
+.muted {
+  color: var(--muted);
+}
+.segment {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.segment button {
+  padding: 4px 14px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+.segment button:hover {
+  color: var(--fg);
+}
+.segment .segmentOn {
+  background: var(--btn-bg);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* ───────── Edit surface ───────── */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 56px 24px;
+  border: 2px dashed var(--border);
+  border-radius: 6px;
+  background: rgba(1, 4, 9, 0.5);
+  color: var(--muted);
+  line-height: 1.5;
+  text-align: center;
+  transition: border-color 0.12s, background-color 0.12s;
+}
+.empty strong {
+  color: var(--fg);
+  font-size: 16px;
+  font-weight: 600;
+}
+.empty span {
+  max-width: 34em;
+}
+.emptyArmed {
+  border-color: #1f6feb;
+  background: rgba(31, 111, 235, 0.1);
+}
+/* A row holds one text block, or one or more cards side by side. Padding (not margin) makes the gaps
+   between rows part of a drop target. */
+.blockRow {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 16px;
+  padding: 12px 0;
+}
+.blockRow + .blockRow {
+  border-top: 1px solid var(--border-muted);
+}
+.blockRow:first-child {
+  padding-top: 0;
+}
+.block {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+}
+.text,
+.block.wide {
+  flex: 1 1 100%;
+}
+/* Narrower than this the toolbar buttons no longer fit, so a small card sits in a wider frame. */
+.cardBlock {
+  min-width: 232px;
+}
+
+.dragging {
+  opacity: 0.4;
+}
+.insert {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: #1f6feb;
+  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.25);
+  pointer-events: none;
+}
+.blockBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.handle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: grab;
+}
+.handle:hover {
+  color: var(--fg);
+  background: var(--btn-bg);
+}
+.handle:active {
+  cursor: grabbing;
+}
+.blockLabel {
+  flex: 1;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.iconBtn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--btn-bg);
+  color: var(--muted);
+}
+.iconBtn:hover:not(:disabled) {
+  border-color: #9198a1;
+  color: var(--fg);
+}
+.iconBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.text {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #010409;
+  color: var(--fg);
+  font: 13px/20px var(--mono);
+  resize: vertical;
+}
+.widget {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.placeholder {
+  padding: 28px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  text-align: center;
+}
+.placeholder a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+}
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.controls label,
+.metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.metrics {
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--muted);
+}
+.controls select,
+.row input {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #010409;
+  color: var(--fg);
+  font-size: 13px;
+}
+.controls select {
+  height: 28px;
+  padding: 0 4px;
+  background: var(--btn-bg);
+  cursor: pointer;
+}
+.row input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+.row input::placeholder,
+.text::placeholder,
+.output::placeholder {
+  color: #7d8590;
+  opacity: 1;
+}
+.controls input[type="checkbox"] {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #1f6feb;
+  cursor: pointer;
+}
+.controls input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+.controls label {
+  cursor: pointer;
+}
+.tail {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  margin-top: 4px;
+  border: 1px dashed transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.tailArmed {
+  border-color: var(--border);
+}
+
+/* ───────── Focus rings ─────────
+   globals.css gives buttons/links/inputs a lime outline offset 4px. Inside the GitHub-styled area that
+   looks off (and gets clipped by .segment and the scrolling board), so use GitHub's blue ring. */
+.card :is(button, a, select, input, textarea):focus-visible,
+.board :is(button, a, select, input, textarea):focus-visible {
+  outline: 2px solid #1f6feb;
+  outline-offset: -2px;
+}
+.card :is(select, input[type="checkbox"]):focus-visible {
+  outline-offset: 1px;
+}
+.card textarea:focus-visible,
+.card .row input:focus-visible {
+  border-color: #1f6feb;
+}
+.preset:focus-within {
+  border-color: #1f6feb;
+}
+.handle:focus-visible {
+  outline: 2px solid #1f6feb;
+}
+
+/* ───────── Rendered README (Preview) ───────── */
+.rendered {
+  font-size: 16px;
+  line-height: 1.5;
+  overflow-wrap: break-word;
+}
+.rendered > :first-child {
+  margin-top: 0;
+}
+.rendered > :last-child {
+  margin-bottom: 0;
+}
+.rendered h1,
+.rendered h2,
+.rendered h3,
+.rendered h4,
+.rendered h5,
+.rendered h6 {
+  margin: 24px 0 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.rendered h1,
+.rendered h2 {
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border-muted);
+}
+.rendered h1 { font-size: 2em; }
+.rendered h2 { font-size: 1.5em; }
+.rendered h3 { font-size: 1.25em; }
+.rendered h4 { font-size: 1em; }
+.rendered h5 { font-size: 0.875em; }
+.rendered h6 { font-size: 0.85em; color: var(--muted); }
+.rendered p,
+.rendered ul,
+.rendered ol,
+.rendered blockquote,
+.rendered pre {
+  margin: 0 0 16px;
+}
+.rendered ul,
+.rendered ol {
+  padding-left: 2em;
+}
+.rendered li + li {
+  margin-top: 0.25em;
+}
+.rendered a {
+  color: var(--link);
+  text-decoration: none;
+}
+.rendered a:hover {
+  text-decoration: underline;
+}
+.rendered code {
+  padding: 0.2em 0.4em;
+  border-radius: 6px;
+  background: rgba(101, 108, 118, 0.2);
+  font: 85% var(--mono);
+}
+.rendered pre {
+  overflow: auto;
+  padding: 16px;
+  border-radius: 6px;
+  background: #151b23;
+  font-size: 85%;
+  line-height: 1.45;
+}
+.rendered pre code {
+  padding: 0;
+  background: none;
+  font-size: 100%;
+}
+.rendered blockquote {
+  padding: 0 1em;
+  border-left: 0.25em solid var(--border);
+  color: var(--muted);
+}
+.rendered hr {
+  height: 0.25em;
+  margin: 24px 0;
+  padding: 0;
+  border: 0;
+  background: var(--border);
+}
+.rendered img {
+  max-width: 100%;
+}
+.figure {
+  margin: 0 0 16px;
+}
+
+/* ───────── Publish card ───────── */
+.publish label {
+  display: block;
+  margin: 16px 0 6px;
+  font-weight: 600;
+}
+.publish .body > label:first-child {
+  margin-top: 0;
+}
+.row {
+  display: flex;
+  gap: 8px;
+}
+.row input {
+  flex: 1;
+  min-width: 0;
+}
+.output {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #010409;
+  color: var(--fg);
+  font: 12px/18px var(--mono);
+  resize: vertical;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--btn-bg);
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 500;
+}
+.btn:hover:not(:disabled) {
+  border-color: #9198a1;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn.primary {
+  border-color: rgba(240, 246, 252, 0.1);
+  background: #238636;
+  color: #fff;
+}
+.btn.primary:hover:not(:disabled) {
+  background: #2ea043;
+}
+/* The one-click publish action is a link when GitHub's own page does the committing. */
+a.btn {
+  text-decoration: none;
+}
+.btn.publishBtn {
+  height: 40px;
+  padding: 0 20px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.success {
+  color: #3fb950;
+}
+.success a {
+  color: inherit;
+  font-weight: 600;
+}
+.manual {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.manual summary {
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.manual summary:hover {
+  color: var(--fg);
+}
+.manual[open] summary {
+  margin-bottom: 8px;
+}
+.help {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.help code {
+  font-family: var(--mono);
+}
+.help a,
+.warnings a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+}
+.error {
+  color: var(--danger);
+}
+.warnings {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.warnings li {
+  padding: 8px 12px;
+  border: 1px solid rgba(210, 153, 34, 0.4);
+  border-radius: 6px;
+  background: rgba(187, 128, 9, 0.1);
+  color: #d29922;
+  font-size: 12px;
+  line-height: 18px;
+}
+.warnings li + li {
+  margin-top: 6px;
+}
+.limit {
+  color: #d29922;
+}
+.previewNote {
+  margin: 0;
+  padding: 0 24px 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.previewFailed {
+  padding: 28px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  text-align: center;
+}
+.previewFailed p {
+  margin: 0 0 12px;
+}
+/* Visually hidden, still announced by screen readers. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ───────── Element board ───────── */
+.board {
+  position: sticky;
+  top: 16px;
+  flex: 0 0 296px;
+  width: 296px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.boardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.boardHead h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.boardHelp {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.group {
+  margin-top: 20px;
+}
+.group h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.group ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.preset {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #151b23;
+  cursor: grab;
+}
+.presetHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.variant {
+  color: var(--muted);
+  font-weight: 500;
+}
+/* Thumbnails are drawn by the same renderer as the README, scaled to the board's width. */
+.thumb {
+  position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #010409;
+  pointer-events: none;
+}
+.thumbImg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.thumbEmpty {
+  width: 100%;
+  background: linear-gradient(110deg, #10151c 30%, #161d26 50%, #10151c 70%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+.thumbText {
+  max-height: 86px;
+  overflow: hidden;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  -webkit-mask-image: linear-gradient(#000 70%, transparent);
+  mask-image: linear-gradient(#000 70%, transparent);
+}
+.thumbText :is(h1, h2, h3, h4, h5, h6) {
+  margin: 0 0 4px;
+  padding: 0;
+  border: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.thumbText :is(p, ul, ol, hr) {
+  margin: 0;
+}
+.thumbText ul,
+.thumbText ol {
+  padding-left: 18px;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.chips button {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+.chips button:hover {
+  color: var(--fg);
+  border-color: #9198a1;
+}
+.chips .chipOn {
+  border-color: #1f6feb;
+  background: rgba(31, 111, 235, 0.16);
+  color: var(--fg);
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+.preset:hover {
+  border-color: #9198a1;
+}
+.preset:active {
+  cursor: grabbing;
+}
+.grip {
+  flex: none;
+  color: var(--muted);
+}
+.presetText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  font-weight: 600;
+}
+.presetText small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.note {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 400;
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ───────── Resizing and side-by-side placement ───────── */
+.sizer {
+  position: relative;
+  max-width: 100%;
+}
+.sizer .widget,
+.sizer .placeholder {
+  width: 100%;
+}
+.resize {
+  position: absolute;
+  top: 0;
+  right: -9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 100%;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.resize::after {
+  content: "";
+  width: 4px;
+  height: min(44px, 60%);
+  border-radius: 2px;
+  background: #1f6feb;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.sizer:hover .resize::after,
+.resize:hover::after,
+.resizing .resize::after {
+  opacity: 0.9;
+}
+.resizing {
+  outline: 1px dashed #1f6feb;
+  outline-offset: 2px;
+}
+.sizeTag {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: rgba(1, 4, 9, 0.85);
+  color: var(--fg);
+  font: 11px/18px var(--mono);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+.sizer:hover .sizeTag,
+.resizing .sizeTag {
+  opacity: 1;
+}
+.insertSide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 3px;
+  border-radius: 2px;
+  background: #1f6feb;
+  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.25);
+  pointer-events: none;
+}
+.insertLeft {
+  left: -10px;
+}
+.insertRight {
+  right: -10px;
+}
+.size {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.size input[type="range"] {
+  width: 130px;
+  accent-color: #1f6feb;
+}
+.size output {
+  min-width: 5ch;
+  color: var(--fg);
+  font: 12px var(--mono);
+}
+.miniBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--btn-bg);
+  color: var(--fg);
+  font-size: 12px;
+}
+.miniBtn:hover:not(:disabled) {
+  border-color: #9198a1;
+}
+.miniBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* Preview: images in one paragraph flow side by side and wrap, separated by a space, as on GitHub. */
+.figureRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 0 0 16px;
+}
+
+@media (max-width: 1011px) {
+  .board {
+    position: static;
+    flex-basis: auto;
+    width: auto;
+    max-height: none;
+    order: -1;
+  }
+  .group ul {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .appbar {
+    padding: 8px 12px;
+  }
+  .body {
+    padding: 16px;
+  }
+  .cardHead {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+  }
+  .title {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .segment button {
+    padding: 4px 10px;
+  }
+  .row {
+    flex-direction: column;
+  }
+  .row input {
+    flex: none;
+    width: 100%;
+  }
+  .row .btn {
+    justify-content: center;
+  }
+  .actions .btn {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+  .board {
+    padding: 12px;
+  }
+  .previewNote {
+    padding: 0 16px 16px;
+  }
+  .empty {
+    padding: 40px 16px;
+  }
+  /* The profile header is look-only chrome and is fixed-width: drop the secondary icon buttons
+     (issues, pull requests, repositories) so it fits phones without sideways scrolling. */
+  .page header > div:last-child > :nth-child(n + 5):nth-child(-n + 7) {
+    display: none;
+  }
+}
+@media (max-width: 400px) {
+  .page header > div:last-child > :nth-child(4) {
+    display: none;
+  }
+}
