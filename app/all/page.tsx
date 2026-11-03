@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import AllDashboard from "@/components/all-dashboard";
+import LocalGate from "@/components/local-gate";
 
 export const metadata: Metadata = {
   title: "All · Atlas",
@@ -7,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function AllPage() {
-  return <AllDashboard />;
+  return <LocalGate><AllDashboard /></LocalGate>;
 }

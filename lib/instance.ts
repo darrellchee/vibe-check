@@ -1,6 +1,7 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { isCloud, redis, storageConfigured } from "./storage";
 import { widgetFlag } from "./providers";
+import { readLocalLink } from "./collector-link";
 import type { UsageProvider } from "./types";
 
 // Runtime-generated credentials let a deployed copy work with zero environment
@@ -28,7 +29,8 @@ const hashPassword = (password: string, salt: string) =>
   scryptSync(password, salt, 64).toString("hex");
 
 export type SetupState =
-  | { cloud: false }
+  // A local copy: `site` is the deployed site it uploads to, once the connect command has linked it.
+  | { cloud: false; site: string | null }
   | { cloud: true; storage: "missing" | "error" }
   | { cloud: true; storage: "ok"; claimed: boolean; managedByEnv: boolean };
 
@@ -49,7 +51,7 @@ export async function readInstance(): Promise<Instance | null> {
 }
 
 export async function setupState(): Promise<SetupState> {
-  if (!isCloud()) return { cloud: false };
+  if (!isCloud()) return { cloud: false, site: (await readLocalLink())?.site ?? null };
   if (!storageConfigured()) return { cloud: true, storage: "missing" };
   const managedByEnv = Boolean(process.env.DASHBOARD_PASSWORD);
   try {

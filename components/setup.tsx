@@ -277,9 +277,16 @@ export default function Setup() {
       <Link className={s.primary} href="/edit">Open README editor <ArrowRight size={16} /></Link>
       {notice}
       <p className={s.hint}>
-        <button className={s.link} onClick={() => { setConnecting(true); setConnect(null); }}>Connect another computer</button>
-        {" · "}
-        <Link className={s.link} href="/all">Open dashboard</Link>
+        {status?.cloud ? (
+          <>
+            <button className={s.link} onClick={() => { setConnecting(true); setConnect(null); }}>Connect another computer</button>
+            {" · "}
+            <Link className={s.link} href="/all">Open dashboard</Link>
+          </>
+        ) : status?.site ? (
+          // The dashboard is only viewed on the deployed site.
+          <a className={s.link} href={`${status.site}/all`}>Open your dashboard ↗</a>
+        ) : null}
       </p>
     </Step>
   );

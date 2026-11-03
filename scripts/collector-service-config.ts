@@ -19,6 +19,12 @@ const unitValue = (value: string, command = false) => {
   return '"' + (command ? escaped.replace(/\$/g, () => "$$") : escaped) + '"';
 };
 
+// Where the service definition lives. Shared with the web app, which reads it to find the linked site.
+export const serviceFile = (platform: "darwin" | "linux", home: string) =>
+  platform === "darwin"
+    ? path.join(home, "Library/LaunchAgents", `${serviceLabel}.plist`)
+    : path.join(home, ".config/systemd/user", `${serviceLabel}.service`);
+
 export function collectorService(config: ServiceConfig) {
   for (const value of Object.values(config)) {
     if (/[\x00-\x1f\x7f]/.test(value)) throw new Error("Service settings cannot contain control characters.");
@@ -29,7 +35,7 @@ export function collectorService(config: ServiceConfig) {
   if (platform === "darwin") {
     const logDir = path.join(home, "Library/Logs/CodexAtlas");
     return {
-      file: path.join(home, "Library/LaunchAgents", `${serviceLabel}.plist`),
+      file: serviceFile("darwin", home),
       logDir,
       content: `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -47,7 +53,7 @@ export function collectorService(config: ServiceConfig) {
     };
   }
   return {
-    file: path.join(home, ".config/systemd/user", `${serviceLabel}.service`),
+    file: serviceFile("linux", home),
     logDir: null,
     content: `# ${serviceMarker}
 [Unit]

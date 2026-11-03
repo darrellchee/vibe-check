@@ -36,6 +36,8 @@ cp .env.example .env.local
 npm run dev
 ```
 
+**The dashboard is only viewed on your deployed site.** On a local copy, the dashboard pages show "You can only view your project in the deployed version" with a button to your site, or open the setup wizard at `/setup` if this computer is not linked to a site yet. A computer is linked once the connect command has installed the collector (or this checkout's `.env.local` has an HTTPS `SYNC_URL`). **Unlink this computer** on that page stops the collector service and removes the site and upload token from its settings; usage already uploaded stays on the site. The README editor at `/edit` still works locally.
+
 Open [localhost:3000](http://localhost:3000) for Codex, [localhost:3000/claude](http://localhost:3000/claude) for Claude Code, [localhost:3000/cursor](http://localhost:3000/cursor) for Cursor, or [localhost:3000/antigravity](http://localhost:3000/antigravity) for Antigravity; the sidebar switches providers. Local Codex mode reads `~/.codex/sessions` and `~/.codex/archived_sessions`, including nested folders and both plain `.jsonl` and Zstandard-compressed `.jsonl.zst` rollouts. Set `CODEX_HOME` to use another retained history directory. The app automatically collects local usage; dashboard refreshes display new data. `USAGE_TIMEZONE` defaults to `Australia/Sydney`.
 
 Claude Code reads `~/.claude/projects` recursively, including project session files and nested subagent logs. `CLAUDE_HOME` overrides the `~/.claude` root containing `projects/`; it does not point at an individual project. No history produces an empty state rather than sample usage.
