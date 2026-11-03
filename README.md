@@ -2,24 +2,29 @@
 
 **Show your recorded AI usage on your GitHub profile.** Self-host your stats card, run an automatic collector on your computer, and paste one image link into your profile README. Includes a private dashboard for exploring your stats.
 
-Open `/share` on your instance for the deploy button generator, card preview, metric choices, and copyable README Markdown. Open `/edit` for the drag-and-drop README Editor. Each developer hosts their own instance; no shared account service is required.
+Open `/setup` on your instance for a three-step guide (deploy, connect, publish) that ends in `/edit`, the drag-and-drop README Editor with a GitHub-style preview. Each developer hosts their own instance; no shared account service is required.
 
 A Next.js dashboard for your **recorded Codex, Claude Code, Cursor, and Antigravity usage**, with a provider switch and separate data for each: token totals by model, a contribution calendar, model share, daily trends, input/output distribution, and activity by hour. It reads real retained provider history; it does not ship invented usage.
 
 The Codex view is useful for a personal Pro subscription. Claude Code works from retained local logs without assuming which subscription or billing plan you use. Cursor coverage depends on the usage records or exports supplied to its collector; it is not inferred from chat text. This is not an OpenAI, Anthropic, or Cursor billing or account-lifetime API. Deleted history, other devices, and cloud-only sessions may be missing. The first and last observed dates describe available coverage, not your account creation date.
 
-## Get started in two steps
+## Get started in three steps
 
-1. **Deploy.** [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fdarrellchee%2Fvibe-check&project-name=vibe-check&repository-name=vibe-check&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22upstash%22%2C%22productSlug%22%3A%22upstash-kv%22%2C%22protocol%22%3A%22storage%22%7D%5D) Vercel copies the repo to your GitHub and creates a free Upstash Redis database. There are no environment variables to fill in.
-2. **Claim and connect.** Open your new site and press **Claim this dashboard**. It generates your password (shown once) and gives you one command to paste into a terminal on the computer with your usage history:
+You don't need to clone this repository. Everything below happens in your browser plus one terminal command.
+
+1. **Deploy.** [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fdarrellchee%2Fvibe-check&project-name=vibe-check&repository-name=vibe-check&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22upstash%22%2C%22productSlug%22%3A%22upstash-kv%22%2C%22protocol%22%3A%22storage%22%7D%5D) Vercel copies the repo to your GitHub and creates a free Upstash Redis database. There are no environment variables to fill in. Then open `https://your-site.vercel.app/setup`. (Starting from `/setup` on any copy does this for you and returns you to your new site automatically.)
+2. **Connect.** Press **Get my command**. This claims the site, shows your dashboard password once (save it: you need it to sign in after today or on another device), and gives you one command to paste into a terminal on the computer you use for AI coding:
 
    ```sh
    curl -fsSL https://your-site.vercel.app/api/install | sh -s -- <one-time-code>
    ```
 
-   The command installs the collector, links it to your dashboard and starts it at login (macOS or Linux, Node.js 24 and git required). Your profile cards are public by default, and the page shows the Markdown to paste into your GitHub profile README.
+   The command installs the collector in `~/.vibe-check`, links it to your site and starts it at login (macOS or Linux, Node.js 24 and git required). The setup page waits for the first upload and moves on by itself.
+3. **Publish.** Press **Open README editor**. It opens with a starter README previewing your real numbers as they will look on GitHub. Adjust it, then publish or copy the Markdown into a public repository named exactly like your GitHub username.
 
-Claim your site right after deploying: the first visitor to press the button owns it, and it can only be claimed once. If someone else claimed it first, delete the project and deploy again. The one-time code works once and expires after 15 minutes; the claimed site can create more from `/setup` while signed in. Read the installer first with `curl -fsSL https://your-site.vercel.app/api/install`. It clones this repository, runs `npm ci`, redeems the code for a per-computer upload token, writes it to `.env.local` with owner-only permissions, and runs `npm run collector:install`.
+Claim your site right after deploying: the first visitor to press **Get my command** owns it, and it can only be claimed once. If someone else claimed it first, delete the project and deploy again. The one-time code works once and expires after 15 minutes; `/setup` makes a new one while you are signed in.
+
+**Why a deployed site and a collector?** Your usage history only exists on your computer, but GitHub can only load images from a public website. The collector uploads usage totals from your computer; your deployed site turns them into the images on your profile. Running a copy locally (below) is optional: it gives you a private dashboard without deploying, and one-click publishing through the GitHub CLI. Read the installer first with `curl -fsSL https://your-site.vercel.app/api/install`. It clones this repository, runs `npm ci`, redeems the code for a per-computer upload token, writes it to `.env.local` with owner-only permissions, and runs `npm run collector:install`.
 
 ## Run locally
 
@@ -127,8 +132,8 @@ Create `.env.cloud` with the cloud deployment variables above. Put the container
 ## GitHub profile cards
 
 1. Deploy and claim your site, then run the connect command (see **Get started**).
-2. Open `/setup` right after claiming, or `/share` any time. Pick a provider, theme and metrics and copy the Markdown.
-3. Paste it into the `README.md` of a public GitHub repository named exactly like your GitHub username.
+2. Open `/edit` (step 3 of `/setup`, or **Put on GitHub** on the dashboard). Pick cards, preview, then publish or copy the Markdown.
+3. If copying, paste it into the `README.md` of a public GitHub repository named exactly like your GitHub username.
 
 Cards are public by default on a claimed site, for every provider including ones added later. To keep one private, set its `PUBLIC_*_WIDGET` variable to `false` and redeploy.
 
@@ -148,7 +153,7 @@ The collector waits 30 seconds after each upload cycle. The dashboard refreshes 
 
 ### README Editor
 
-Open `/edit` (the **Edit** entry in the nav bar) to build a whole profile README instead of pasting one card. Drag elements from the board onto the README (a usage card, an activity calendar, or text blocks), then switch between **Edit** and **Preview**. Every thumbnail on the board is that card drawn with your own usage (or labelled sample data where a provider has none yet), and the board can be filtered by provider.
+Open `/edit` (the last step of `/setup`) to build a whole profile README instead of pasting one card. On your first visit it starts from a ready-made README (a heading, your combined usage card and activity calendar) shown in **Preview**. Drag elements from the board onto the README (a usage card, an activity calendar, or text blocks), then switch between **Edit** and **Preview**. Every thumbnail on the board is that card drawn with your own usage (or labelled sample data where a provider has none yet), and the board can be filtered by provider.
 
 **Presets and styles.** Each provider has ready-made presets: usage cards in *Classic*, *Compact*, *Spotlight* and *Light* looks, and calendars in *Classic*, *Compact* and *Light*. Every card then has its own **Theme**, **Style** and **Accent** (lime, orange, blue, violet or mono) controls. Provider presets use that provider's dashboard colour.
 

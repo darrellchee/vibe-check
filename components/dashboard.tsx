@@ -540,10 +540,10 @@ export default function Dashboard({
             <div className="heading-actions">
               <Link
                 className="button"
-                href="/share"
-                aria-label="Set up your GitHub profile card"
+                href="/setup"
+                aria-label="Put your usage on your GitHub profile"
               >
-                <Code2 size={14} /> GitHub profile
+                <Code2 size={14} /> Put on GitHub
               </Link>
               <button
                 className="icon-button"

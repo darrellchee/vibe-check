@@ -205,6 +205,9 @@ test("install script is valid POSIX sh, pinned to this site, and refuses unsafe 
   const script = installScript(ORIGIN, "https://github.com/darrellchee/vibe-check.git");
   assert.ok(script.includes(`SITE='${ORIGIN}'`));
   assert.equal(script.includes("__SITE__") || script.includes("__REPO__"), false);
+  // The last thing it says sends people back to the setup wizard, not the retired /share page.
+  assert.match(script, /go back to the setup page/);
+  assert.equal(script.includes("/share"), false);
   const syntax = spawnSync("sh", ["-n"], { input: script, encoding: "utf8" });
   assert.equal(syntax.status, 0, syntax.stderr);
   for (const site of ["http://evil.example", "https://a.example/path", "https://a.example'; rm -rf ~ #", "https://user@a.example"])

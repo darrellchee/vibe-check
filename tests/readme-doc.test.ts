@@ -8,9 +8,22 @@ import { collectUsage } from "../lib/collector";
 import { calendarEmbed, cardOptions, profileEmbed, renderActivityCalendar } from "../lib/profile-card";
 import { parseInline, parseMarkdown, safeUrl } from "../lib/markdown";
 import {
-  insertBlock, MAX_BLOCKS, MAX_TEXT, moveBlock, PLACEHOLDER_ORIGIN, PRESETS, sanitizeBlocks, serializeReadme, stepBlock,
+  insertBlock, MAX_BLOCKS, MAX_TEXT, moveBlock, PLACEHOLDER_ORIGIN, PRESETS, sanitizeBlocks, serializeReadme, starterReadme, stepBlock,
   type ReadmeBlock,
 } from "../lib/readme-doc";
+
+test("the starter README is a heading plus the combined card and calendar, and survives storage", () => {
+  const starter = starterReadme();
+  assert.deepEqual(starter.map((b) => b.type), ["text", "usage", "calendar"]);
+  assert.deepEqual(sanitizeBlocks(JSON.parse(JSON.stringify(starter))), starter);
+  assert.notEqual(starterReadme()[0].id, starter[0].id); // Fresh ids every time.
+  const { markdown, originError } = serializeReadme(starter, "https://atlas.example");
+  assert.equal(originError, "");
+  const images = [...markdown.matchAll(/\]\((https:[^)]+)\)/g)].map((m) => new URL(m[1]));
+  assert.equal(images.length, 2);
+  assert.ok(images.every((url) => url.searchParams.get("provider") === "all"));
+  assert.equal(images[1].searchParams.get("kind"), "calendar");
+});
 
 const text = (id: string, body = id): ReadmeBlock => ({ id, type: "text", text: body });
 const ids = (blocks: ReadmeBlock[]) => blocks.map((b) => b.id).join("");
@@ -667,4 +680,21 @@ test("sample data is deterministic, plausible and never mistaken for the real th
   assert.equal(sample.provider, "cursor");
   assert.ok(Date.parse(sample.generatedAt) === now);
   assert.match(renderActivityCalendar(sample, "cursor", "dark"), /active days/);
+});
+
+test("All presets lead with tokens, sessions and cost, and survive a save and reload", () => {
+  const all = PRESETS.filter((p) => p.provider === "all");
+  assert.deepEqual(all.map((p) => `${p.group}/${p.variant}`), [
+    "Usage cards/Classic", "Usage cards/Compact", "Usage cards/Spotlight", "Usage cards/Light",
+    "Activity calendars/Classic", "Activity calendars/Compact", "Activity calendars/Light",
+  ]);
+  const usage = all[0].block;
+  assert.ok(usage.type === "usage" && usage.metrics.join() === "tokens,sessions,cost");
+  const blocks = all.map((p, i) => ({ ...p.block, id: `b${i}` }) as ReadmeBlock);
+  assert.deepEqual(sanitizeBlocks(JSON.parse(JSON.stringify(blocks))), blocks);
+  const { markdown, originError } = serializeReadme(blocks.slice(0, 1).concat(blocks.slice(4, 5)), "https://atlas.example");
+  assert.equal(originError, "");
+  assert.match(markdown, /provider=all/);
+  assert.match(markdown, /metrics=tokens%2Csessions%2Ccost|metrics=tokens,sessions,cost/);
+  assert.match(markdown, /kind=calendar&provider=all/);
 });

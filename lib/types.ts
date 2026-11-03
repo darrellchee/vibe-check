@@ -1,4 +1,6 @@
 export type UsageProvider = "codex" | "claude" | "cursor" | "antigravity";
+// Cards can also summarise every harness at once; "all" is a view, never a stored provider.
+export type CardProvider = UsageProvider | "all";
 
 export interface TokenTotals {
   inputTokens: number;

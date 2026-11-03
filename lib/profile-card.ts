@@ -1,9 +1,11 @@
-import type { UsageProvider, UsageSnapshot } from "./types";
+import type { CardProvider, UsageSnapshot } from "./types";
 import { providerName } from "./providers";
 
 export type CardTheme = "dark" | "light";
-export type CardMetric = "tokens" | "sessions" | "requests";
-export const cardMetrics: CardMetric[] = ["tokens", "sessions", "requests"];
+// "cost" is the API-equivalent estimate in USD, never a subscription bill.
+export type CardMetric = "tokens" | "sessions" | "requests" | "cost";
+export const cardMetrics: CardMetric[] = ["tokens", "sessions", "requests", "cost"];
+export const MAX_METRICS = 3;
 // "usage" is the summary card; "calendar" is a year of per-day activity levels.
 export type CardKind = "usage" | "calendar";
 export const cardKinds: CardKind[] = ["usage", "calendar"];
@@ -15,7 +17,7 @@ export type CardAccent = "lime" | "orange" | "blue" | "violet" | "mono";
 export const cardAccents: CardAccent[] = ["lime", "orange", "blue", "violet", "mono"];
 export interface CardLook { style?: CardStyle; accent?: CardAccent }
 // Each provider's accent matches its colour on the dashboard.
-export const providerAccent: Record<UsageProvider, CardAccent> = { codex: "lime", claude: "orange", cursor: "blue", antigravity: "violet" };
+export const providerAccent: Record<CardProvider, CardAccent> = { all: "mono", codex: "lime", claude: "orange", cursor: "blue", antigravity: "violet" };
 export const stylesFor = (kind: CardKind) => (kind === "calendar" ? calendarStyles : cardStyles);
 
 // Natural size of each card's SVG, so previews can reserve space and resize proportionally.
@@ -58,9 +60,9 @@ export function cardOptions(url: URL) {
   const metrics = (url.searchParams.get("metrics") ?? "tokens,sessions").split(",");
   if (url.searchParams.getAll("theme").length > 1 || !["dark", "light"].includes(theme))
     throw new Error("Choose theme=dark or theme=light.");
-  if (url.searchParams.getAll("metrics").length > 1 || metrics.length > 3 ||
+  if (url.searchParams.getAll("metrics").length > 1 || metrics.length > MAX_METRICS ||
     new Set(metrics).size !== metrics.length || metrics.some((m) => !cardMetrics.includes(m as CardMetric)))
-    throw new Error("Choose one to three unique metrics: tokens,sessions,requests.");
+    throw new Error("Choose one to three unique metrics: tokens,sessions,requests,cost.");
   const kind = url.searchParams.get("kind") ?? "usage";
   if (url.searchParams.getAll("kind").length > 1 || !cardKinds.includes(kind as CardKind))
     throw new Error("Choose kind=usage or kind=calendar.");
@@ -75,17 +77,17 @@ export function cardOptions(url: URL) {
   return { kind: kind as CardKind, theme: theme as CardTheme, metrics: metrics as CardMetric[], style: style as CardStyle, accent: accent as CardAccent };
 }
 
-export function renderProfileCard(snapshot: UsageSnapshot, provider: UsageProvider,
+export function renderProfileCard(snapshot: UsageSnapshot, provider: CardProvider,
   theme: CardTheme, metrics: CardMetric[], look: CardLook = {}) {
   const colors = PALETTES[look.accent ?? "lime"][theme], style = look.style ?? "classic";
-  const name = providerName(provider);
-  const totals = { tokens: snapshot.totals.totalTokens, sessions: snapshot.totals.sessions, requests: snapshot.totals.humanRequests };
-  const labels = { tokens: "RECORDED TOKENS", sessions: "SESSIONS", requests: "HUMAN REQUESTS" };
-  const available = { tokens: snapshot.availability?.tokens !== false, sessions: snapshot.availability?.sessions !== false, requests: snapshot.availability?.humanRequests !== false };
+  const name = provider === "all" ? "All harnesses" : providerName(provider);
+  const totals = { tokens: snapshot.totals.totalTokens, sessions: snapshot.totals.sessions, requests: snapshot.totals.humanRequests, cost: snapshot.totals.costUsd };
+  const labels = { tokens: "RECORDED TOKENS", sessions: "SESSIONS", requests: "HUMAN REQUESTS", cost: "ESTIMATED COST" };
+  const available = { tokens: snapshot.availability?.tokens !== false, sessions: snapshot.availability?.sessions !== false, requests: snapshot.availability?.humanRequests !== false, cost: snapshot.availability?.cost !== false };
   // No source model names, warnings, paths, usernames or arbitrary query strings enter the SVG.
   const updated = new Date(snapshot.generatedAt).toISOString().slice(0, 16).replace("T", " ") + " UTC";
   const stale = Date.now() - Date.parse(snapshot.generatedAt) > 90_000;
-  const value = (metric: CardMetric) => available[metric] ? compact(totals[metric]) : "Unavailable";
+  const value = (metric: CardMetric) => !available[metric] ? "Unavailable" : metric === "cost" ? `$${compact(totals.cost)}` : compact(totals[metric]);
   const summary = metrics.map((metric) => `${value(metric)} ${labels[metric].toLowerCase()}`).join(", ");
   const text = (x: number, y: number, fill: string, size: number, content: string, extra = "") =>
     `<text x="${x}" y="${y}" fill="${fill}" font-size="${size}"${extra}>${content}</text>`;
@@ -137,12 +139,12 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 
 // A GitHub-style year of activity. Only per-day intensity levels, a total and a count of active
 // days reach the SVG: no model names, project paths or exact daily figures.
-export function renderActivityCalendar(snapshot: UsageSnapshot, provider: UsageProvider, theme: CardTheme, look: CardLook = {}) {
+export function renderActivityCalendar(snapshot: UsageSnapshot, provider: CardProvider, theme: CardTheme, look: CardLook = {}) {
   const colors = PALETTES[look.accent ?? "lime"][theme], slim = look.style === "compact";
   // The compact style drops the footer: a header, the grid and the legend.
   const titleY = slim ? 26 : 35, gridY = slim ? 46 : 64, legendY = slim ? 140 : 173;
   const { width, height } = cardSize("calendar", slim ? "compact" : "classic");
-  const name = providerName(provider);
+  const name = provider === "all" ? "All harnesses" : providerName(provider);
   // Tokens first, falling back to human requests when a source cannot report tokens. Cursor is the
   // exception (as on the dashboard): its token data only covers the exported or synced range, while
   // human requests span all retained history, so requests are preferred whenever they are recorded.
@@ -231,25 +233,25 @@ function setLook(image: URL, look: CardLook) {
   if (look.accent && look.accent !== "lime") image.searchParams.set("accent", look.accent);
 }
 
-export function calendarEmbed(origin: string, provider: UsageProvider, theme: CardTheme, look: CardLook = {}) {
+export function calendarEmbed(origin: string, provider: CardProvider, theme: CardTheme, look: CardLook = {}) {
   const image = cardUrl(origin);
   image.searchParams.set("kind", "calendar");
   image.searchParams.set("provider", provider);
   image.searchParams.set("theme", theme);
   setLook(image, look);
   const imageUrl = markdownSafe(image);
-  const alt = `My recorded ${providerName(provider)} activity`;
+  const alt = provider === "all" ? "My recorded AI coding activity" : `My recorded ${providerName(provider)} activity`;
   return { image: imageUrl, alt, markdown: `![${alt}](${imageUrl})` };
 }
 
-export function profileEmbed(origin: string, provider: UsageProvider, theme: CardTheme, metrics: CardMetric[], look: CardLook = {}) {
+export function profileEmbed(origin: string, provider: CardProvider, theme: CardTheme, metrics: CardMetric[], look: CardLook = {}) {
   const image = cardUrl(origin);
   image.searchParams.set("provider", provider);
   image.searchParams.set("theme", theme);
   image.searchParams.set("metrics", metrics.join(","));
   setLook(image, look);
   const imageUrl = markdownSafe(image);
-  const alt = `My recorded ${providerName(provider)} usage`;
+  const alt = provider === "all" ? "My recorded AI coding usage" : `My recorded ${providerName(provider)} usage`;
   return { image: imageUrl, alt, markdown: `![${alt}](${imageUrl})` };
 }
 
@@ -257,7 +259,9 @@ export const UPSTREAM_REPOSITORY = "https://github.com/darrellchee/vibe-check";
 
 // One click: clone the repo, create the project, and provision a free Upstash Redis store.
 // No environment values are requested; secrets are generated when the owner claims the site.
-export function deploymentUrl(repository = UPSTREAM_REPOSITORY) {
+// `redirect` is where Vercel sends the user afterwards; it appends `deployment-url` so the setup
+// page can carry on at the new site.
+export function deploymentUrl(repository = UPSTREAM_REPOSITORY, { redirect }: { redirect?: string } = {}) {
   const url = new URL(repository);
   if (url.origin !== "https://github.com" || !/^\/[\w.-]+\/[\w.-]+\/?$/.test(url.pathname) || url.search || url.hash || url.username || url.password)
     throw new Error("Enter a GitHub repository URL: https://github.com/owner/repo");
@@ -268,5 +272,6 @@ export function deploymentUrl(repository = UPSTREAM_REPOSITORY) {
   deploy.searchParams.set("stores", JSON.stringify([
     { type: "integration", integrationSlug: "upstash", productSlug: "upstash-kv", protocol: "storage" },
   ]));
+  if (redirect) deploy.searchParams.set("redirect-url", redirect);
   return deploy.href;
 }

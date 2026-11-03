@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Mona_Sans } from "next/font/google";
 import ReadmeEditor from "./readme-editor";
 
-// GitHub's UI font, self-hosted by next/font like the static profile copy.
+// GitHub's UI font, self-hosted by next/font, for the GitHub-style frame around the editor.
 const mona = Mona_Sans({ subsets: ["latin"], axes: ["wdth"], display: "swap", variable: "--font-mona" });
 
 export const metadata: Metadata = {

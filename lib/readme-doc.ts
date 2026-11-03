@@ -1,7 +1,7 @@
-import { PROVIDERS, providerName } from "./providers";
+import { CARD_PROVIDERS, isCardProvider, providerName } from "./providers";
 import { calendarEmbed, cardAccents, cardMetrics, cardStyles, calendarStyles, profileEmbed, providerAccent,
   type CardAccent, type CardMetric, type CardStyle, type CardTheme } from "./profile-card";
-import type { UsageProvider } from "./types";
+import type { CardProvider } from "./types";
 
 // The README is an ordered list of blocks: free Markdown text, or a widget that becomes an image
 // served by this instance's public card endpoint.
@@ -11,13 +11,13 @@ import type { UsageProvider } from "./types";
 // removing a block can't leave the layout inconsistent. Text is always a row of its own.
 export type ReadmeBlock =
   | { id: string; type: "text"; text: string }
-  | { id: string; type: "usage"; provider: UsageProvider; theme: CardTheme; metrics: CardMetric[]; style?: CardStyle; accent?: CardAccent; width?: number; row?: string }
-  | { id: string; type: "calendar"; provider: UsageProvider; theme: CardTheme; style?: CardStyle; accent?: CardAccent; width?: number; row?: string };
+  | { id: string; type: "usage"; provider: CardProvider; theme: CardTheme; metrics: CardMetric[]; style?: CardStyle; accent?: CardAccent; width?: number; row?: string }
+  | { id: string; type: "calendar"; provider: CardProvider; theme: CardTheme; style?: CardStyle; accent?: CardAccent; width?: number; row?: string };
 export type NewBlock = ReadmeBlock extends infer B ? (B extends { id: string } ? Omit<B, "id"> : never) : never;
 
 export type PresetGroup = "Usage cards" | "Activity calendars" | "Markdown";
 // Card presets belong to a provider and name their look (`variant`); Markdown presets have neither.
-export interface Preset { id: string; group: PresetGroup; title: string; hint: string; block: NewBlock; provider?: UsageProvider; variant?: string }
+export interface Preset { id: string; group: PresetGroup; title: string; hint: string; block: NewBlock; provider?: CardProvider; variant?: string }
 export const PRESET_GROUPS: PresetGroup[] = ["Usage cards", "Activity calendars", "Markdown"];
 
 type CardBlock = Exclude<NewBlock, { type: "text" }>;
@@ -27,6 +27,14 @@ const USAGE_LOOKS: { variant: string; hint: string; look: (accent: CardAccent) =
   { variant: "Spotlight", hint: "One big number", look: (accent) => ({ accent, style: "spotlight", metrics: ["tokens", "sessions"] }) },
   { variant: "Light", hint: "Classic on a light background", look: (accent) => ({ accent, theme: "light", metrics: ["tokens", "sessions", "requests"] }) },
 ];
+// "All" adds up every harness and leads with the headline figures: tokens, sessions and the estimated
+// (API-equivalent) cost.
+const ALL_USAGE_LOOKS: typeof USAGE_LOOKS = [
+  { variant: "Classic", hint: "Tokens, sessions and estimated cost", look: (accent) => ({ accent, metrics: ["tokens", "sessions", "cost"] }) },
+  { variant: "Compact", hint: "One slim row, three metrics", look: (accent) => ({ accent, style: "compact", metrics: ["tokens", "sessions", "cost"] }) },
+  { variant: "Spotlight", hint: "One big number, with sessions and cost", look: (accent) => ({ accent, style: "spotlight", metrics: ["tokens", "sessions", "cost"] }) },
+  { variant: "Light", hint: "Classic on a light background", look: (accent) => ({ accent, theme: "light", metrics: ["tokens", "sessions", "cost"] }) },
+];
 const CALENDAR_LOOKS: { variant: string; hint: string; look: (accent: CardAccent) => Partial<Extract<CardBlock, { type: "calendar" }>> }[] = [
   { variant: "Classic", hint: "Last 12 months", look: (accent) => ({ accent }) },
   { variant: "Compact", hint: "Just the heatmap", look: (accent) => ({ accent, style: "compact" }) },
@@ -34,11 +42,11 @@ const CALENDAR_LOOKS: { variant: string; hint: string; look: (accent: CardAccent
 ];
 
 export const PRESETS: Preset[] = [
-  ...PROVIDERS.flatMap((provider) => USAGE_LOOKS.map(({ variant, hint, look }): Preset => ({
+  ...CARD_PROVIDERS.flatMap((provider) => (provider === "all" ? ALL_USAGE_LOOKS : USAGE_LOOKS).map(({ variant, hint, look }): Preset => ({
     id: `usage-${provider}-${variant.toLowerCase()}`, group: "Usage cards", title: providerName(provider), variant, hint, provider,
     block: { type: "usage", provider, theme: "dark", metrics: ["tokens", "sessions"], ...look(providerAccent[provider]) },
   }))),
-  ...PROVIDERS.flatMap((provider) => CALENDAR_LOOKS.map(({ variant, hint, look }): Preset => ({
+  ...CARD_PROVIDERS.flatMap((provider) => CALENDAR_LOOKS.map(({ variant, hint, look }): Preset => ({
     id: `calendar-${provider}-${variant.toLowerCase()}`, group: "Activity calendars", title: providerName(provider), variant, hint, provider,
     block: { type: "calendar", provider, theme: "dark", ...look(providerAccent[provider]) },
   }))),
@@ -52,6 +60,17 @@ export const PRESETS: Preset[] = [
 let counter = 0;
 export const newId = () => `b${Date.now().toString(36)}${(counter++).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 export const makeBlock = (block: NewBlock): ReadmeBlock => ({ ...structuredClone(block), id: newId() }) as ReadmeBlock;
+
+// What a first-time visitor sees: a heading, the combined usage card and the combined calendar,
+// so the preview shows their own numbers before they have touched anything.
+export function starterReadme(): ReadmeBlock[] {
+  const preset = (id: string) => {
+    const found = PRESETS.find((p) => p.id === id);
+    if (!found) throw new Error(`Missing preset ${id}`);
+    return makeBlock(found.block);
+  };
+  return [preset("heading"), preset("usage-all-classic"), preset("calendar-all-classic")];
+}
 
 export function insertBlock(blocks: ReadmeBlock[], index: number, block: ReadmeBlock) {
   const at = Math.max(0, Math.min(index, blocks.length));
@@ -227,7 +246,6 @@ export function serializeReadme(blocks: ReadmeBlock[], origin: string) {
 }
 
 const isTheme = (v: unknown): v is CardTheme => v === "dark" || v === "light";
-const isProvider = (v: unknown): v is UsageProvider => PROVIDERS.includes(v as UsageProvider);
 // Cut at MAX_TEXT without leaving half of a surrogate pair behind.
 const clipText = (text: string) => {
   const clipped = text.slice(0, MAX_TEXT), last = clipped.charCodeAt(clipped.length - 1);
@@ -253,11 +271,11 @@ export function sanitizeBlocks(value: unknown): ReadmeBlock[] {
       ...(cardAccents.includes(b.accent as CardAccent) ? { accent: b.accent as CardAccent } : {}),
     });
     if (b.type === "text" && typeof b.text === "string") out.push({ id: b.id, type: "text", text: clipText(b.text) });
-    else if (b.type === "usage" && isProvider(b.provider) && isTheme(b.theme) && Array.isArray(b.metrics)) {
+    else if (b.type === "usage" && isCardProvider(b.provider) && isTheme(b.theme) && Array.isArray(b.metrics)) {
       const metrics = cardMetrics.filter((m) => (b.metrics as unknown[]).includes(m));
       if (!metrics.length) continue;
       out.push({ id: b.id, type: "usage", provider: b.provider, theme: b.theme, metrics, ...look(cardStyles), ...layout });
-    } else if (b.type === "calendar" && isProvider(b.provider) && isTheme(b.theme))
+    } else if (b.type === "calendar" && isCardProvider(b.provider) && isTheme(b.theme))
       out.push({ id: b.id, type: "calendar", provider: b.provider, theme: b.theme, ...look(calendarStyles), ...layout });
     else continue;
     seen.add(b.id);

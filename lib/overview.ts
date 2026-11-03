@@ -1,5 +1,5 @@
 import { PROVIDERS } from "./providers";
-import type { MetricAvailability, UsageProvider, UsageSnapshot } from "./types";
+import type { DailyUsage, MetricAvailability, UsageProvider, UsageSnapshot } from "./types";
 
 export interface HarnessUsage {
   provider: UsageProvider;
@@ -37,6 +37,60 @@ export async function loadHarnesses(fetcher: typeof fetch = fetch) {
   }));
   // Never retain or display private data after an authorization failure.
   return { locked, harnesses: locked ? [] : harnesses };
+}
+
+const TOKEN_FIELDS = ["inputTokens", "cachedInputTokens", "cacheWriteTokens", "outputTokens", "reasoningTokens", "totalTokens"] as const;
+const AVAILABILITY_KEYS: (keyof MetricAvailability)[] = ["tokens", "cost", "sessions", "humanRequests", "assistantRequests", "cacheBreakdown"];
+
+// One snapshot that adds up several harnesses, so the cards that draw a single snapshot can draw "All".
+// A metric is summed only from harnesses that actually report it (as on the All dashboard) and counts as
+// available when at least one does. Models and hours are left empty: no card shows them, and merging
+// them across harnesses would imply a precision the sources do not share.
+export function combineSnapshots(snapshots: UsageSnapshot[]): UsageSnapshot | null {
+  const connected = snapshots.filter(hasHistory);
+  if (!connected.length) return null;
+  const availability = Object.fromEntries(AVAILABILITY_KEYS.map((key) =>
+    [key, connected.some((s) => metricAvailable(s, key))])) as unknown as MetricAvailability;
+  const zeroTokens = () => Object.fromEntries(TOKEN_FIELDS.map((key) => [key, 0])) as Record<(typeof TOKEN_FIELDS)[number], number>;
+  const totals = {
+    ...zeroTokens(), sessions: 0, humanRequests: 0, assistantRequests: 0,
+    averageTokensPerSession: 0, costUsd: 0, unpricedTokens: 0,
+  };
+  const days = new Map<string, DailyUsage>();
+  for (const s of connected) {
+    const tokens = metricAvailable(s, "tokens"), sessions = metricAvailable(s, "sessions"), cost = metricAvailable(s, "cost");
+    const requests = metricAvailable(s, "humanRequests"), assistant = metricAvailable(s, "assistantRequests");
+    if (tokens) for (const key of TOKEN_FIELDS) totals[key] += s.totals[key];
+    if (sessions) totals.sessions += s.totals.sessions;
+    if (requests) totals.humanRequests += s.totals.humanRequests;
+    if (assistant) totals.assistantRequests += s.totals.assistantRequests;
+    if (cost) totals.costUsd += s.totals.costUsd;
+    if (tokens) totals.unpricedTokens += s.totals.unpricedTokens;
+    for (const day of s.daily) {
+      const row = days.get(day.date) ?? { ...zeroTokens(), date: day.date, models: [], sessions: 0, humanRequests: 0,
+        assistantRequests: 0, costUsd: 0, unpricedTokens: 0 };
+      if (tokens) { for (const key of TOKEN_FIELDS) row[key] += day[key]; row.unpricedTokens += day.unpricedTokens; }
+      if (sessions) row.sessions += day.sessions;
+      if (requests) row.humanRequests += day.humanRequests;
+      if (assistant) row.assistantRequests += day.assistantRequests;
+      if (cost) row.costUsd += day.costUsd;
+      days.set(day.date, row);
+    }
+  }
+  totals.averageTokensPerSession = totals.sessions ? Math.round(totals.totalTokens / totals.sessions) : 0;
+  const daily = [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const events = connected.flatMap((s) => [s.coverage.firstEvent, s.coverage.lastEvent]).filter((d): d is string => Boolean(d)).sort();
+  const latest = connected.reduce((a, s) => (Date.parse(s.generatedAt) > Date.parse(a.generatedAt) ? s : a));
+  return {
+    availability, version: 1, generatedAt: latest.generatedAt, source: latest.source, timezone: latest.timezone,
+    coverage: {
+      firstEvent: events[0] ?? null, lastEvent: events.at(-1) ?? null,
+      filesScanned: connected.reduce((sum, s) => sum + s.coverage.filesScanned, 0),
+      malformedLines: connected.reduce((sum, s) => sum + s.coverage.malformedLines, 0), warnings: [],
+    },
+    totals, models: [], daily, hours: [], mostExpensiveDay: null, mostExpensive24h: null,
+    pricing: { checkedAt: latest.pricing.checkedAt, sources: [] },
+  };
 }
 
 export function summarizeHarnesses(harnesses: HarnessUsage[]) {

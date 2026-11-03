@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { collectUsage } from "../lib/collector";
-import { hasHistory, loadHarnesses, summarizeHarnesses } from "../lib/overview";
+import { combineSnapshots, hasHistory, loadHarnesses, summarizeHarnesses } from "../lib/overview";
 import { PROVIDERS } from "../lib/providers";
 import type { UsageProvider, UsageSnapshot } from "../lib/types";
 
@@ -79,4 +79,32 @@ test("An authorization failure clears all private results", async () => {
     ? Response.json({ error: "Sign in" }, { status: 401 }) : Response.json(snapshot));
   assert.equal(result.locked, true);
   assert.deepEqual(result.harnesses, []);
+});
+
+test("combineSnapshots adds harnesses into one snapshot that the cards can draw", async () => {
+  const harnesses = await Promise.all(PROVIDERS.map((provider, index) => fixture(provider, (index + 1) * 100)));
+  const before = JSON.stringify(harnesses);
+  const all = combineSnapshots(harnesses)!;
+  assert.equal(all.totals.totalTokens, 1000);
+  assert.equal(all.totals.sessions, 12);
+  assert.equal(all.totals.costUsd, 8);
+  assert.deepEqual(all.daily.map((d) => [d.date, d.totalTokens, d.sessions]), [["2026-10-19", 500, 0], ["2026-10-21", 500, 0]]);
+  assert.equal(all.coverage.firstEvent, "2026-10-19T12:00:00Z");
+  assert.equal(JSON.stringify(harnesses), before);
+  assert.equal(combineSnapshots([]), null);
+});
+
+test("combineSnapshots skips empty harnesses and metrics a harness cannot report", async () => {
+  const cursor = await fixture("cursor", 999);
+  cursor.availability = { tokens: false, cost: false, sessions: true, humanRequests: true, assistantRequests: false, cacheBreakdown: false };
+  const claude = await fixture("claude", 50);
+  const empty = await collectUsage(`/tmp/atlas-overview-missing-${process.pid}`);
+  const all = combineSnapshots([cursor, claude, { ...empty, provider: "codex" }])!;
+  assert.equal(all.totals.totalTokens, 50);
+  assert.equal(all.totals.costUsd, 2);
+  assert.equal(all.totals.sessions, 6);
+  assert.equal(all.availability?.tokens, true);
+  const none = combineSnapshots([cursor])!;
+  assert.equal(none.availability?.tokens, false);
+  assert.equal(none.availability?.cost, false);
 });

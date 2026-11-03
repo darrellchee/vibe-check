@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Activity, ArrowDownToLine, ArrowRight, ArrowUpRight, Fingerprint, Info,
+import { Activity, ArrowDownToLine, ArrowRight, ArrowUpRight, Code2, Fingerprint, Info,
   Layers3, LoaderCircle, LockKeyhole, RefreshCw, Terminal, Zap } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import ProviderNavigation from "./provider-navigation";
@@ -123,6 +123,9 @@ export default function AllDashboard() {
               <p>Your overall usage across Codex, Claude Code, Cursor and Antigravity.</p>
             </div>
             <div className="heading-actions">
+              <Link className="button" href="/setup" aria-label="Put your usage on your GitHub profile">
+                <Code2 size={14} /> Put on GitHub
+              </Link>
               <button className="icon-button" aria-label="Refresh usage" disabled={busy} onClick={() => void refresh()}>
                 <RefreshCw size={16} className={busy ? "spin" : ""} />
               </button>

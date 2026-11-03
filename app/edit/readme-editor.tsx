@@ -6,19 +6,19 @@ import Link from "next/link";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CalendarDays, ChartColumn, Check, Columns2, Copy, Download, ExternalLink, GripVertical,
   Layers3, Plus, RefreshCw, RotateCcw, Rows2, Trash2, Type, Upload } from "lucide-react";
 import ProviderNavigation from "@/components/provider-navigation";
-import { hasHistory, loadHarnesses, type HarnessUsage } from "@/lib/overview";
+import { combineSnapshots, hasHistory, loadHarnesses, type HarnessUsage } from "@/lib/overview";
 import { PROVIDERS, providerName } from "@/lib/providers";
-import { cardAccents, cardMetrics, cardSize, renderActivityCalendar, renderProfileCard, stylesFor,
+import { cardAccents, cardMetrics, cardSize, MAX_METRICS, renderActivityCalendar, renderProfileCard, stylesFor,
   type CardAccent, type CardMetric, type CardStyle, type CardTheme } from "@/lib/profile-card";
 import { sampleSnapshot } from "@/lib/sample-snapshot";
 import { LOGIN_PATTERN, probeProfile, webPublish, type RepoProbe } from "@/lib/github-web";
 import { parseMarkdown, type Inline, type MdBlock } from "@/lib/markdown";
 import { insertBlock, joinTarget, leaveRow, makeBlock, MAX_BLOCKS, MAX_TEXT, MAX_WIDTH, MIN_WIDTH, placeBlock, PRESET_GROUPS, PRESETS,
-  rowRanges, sameLayout, sanitizeBlocks, serializeReadme, snapWidth, stepBlock, widthOf,
+  rowRanges, sameLayout, sanitizeBlocks, serializeReadme, snapWidth, starterReadme, stepBlock, widthOf,
   type DropTarget, type Preset, type PresetGroup, type ReadmeBlock } from "@/lib/readme-doc";
-import type { UsageProvider, UsageSnapshot } from "@/lib/types";
-import { Chrome, type ChromeTab } from "../github-profile/chrome";
-import s from "../github-profile/profile.module.css";
+import type { CardProvider, UsageProvider, UsageSnapshot } from "@/lib/types";
+import { Chrome, type ChromeTab } from "../_github-frame/chrome";
+import s from "../_github-frame/profile.module.css";
 import e from "./editor.module.css";
 
 const STORAGE_KEY = "atlas:readme-editor:v1";
@@ -29,7 +29,7 @@ const TABS: ChromeTab[] = [
   { icon: "package", label: "Packages" },
   { icon: "star", label: "Stars" },
 ];
-const METRIC_LABELS: Record<CardMetric, string> = { tokens: "Tokens", sessions: "Sessions", requests: "Human requests" };
+const METRIC_LABELS: Record<CardMetric, string> = { tokens: "Tokens", sessions: "Sessions", requests: "Human requests", cost: "Estimated cost" };
 const STYLE_LABELS: Record<CardStyle, string> = { classic: "Classic", compact: "Compact", spotlight: "Spotlight" };
 const ACCENT_LABELS: Record<CardAccent, string> = { lime: "Lime", orange: "Orange", blue: "Blue", violet: "Violet", mono: "Mono" };
 const GROUP_ICONS = { "Usage cards": ChartColumn, "Activity calendars": CalendarDays, Markdown: Type } as const;
@@ -145,9 +145,10 @@ const WidgetPreview = memo(function WidgetPreview({ block, snapshot, status, err
   return <div className={e.placeholder}>
     {src === null ? `The ${blockLabel(block)} could not be rendered from your latest data.`
       : status === "loading" ? "Loading your usage…"
-        : status === "locked" ? <>Sign in to preview your data. <Link href="/all">Unlock the dashboard</Link></>
+        : status === "locked" ? <>Sign in to preview your data. <Link href="/setup">Sign in</Link></>
           : status === "error" ? error
-            : <>No {providerName(block.provider)} usage recorded yet. <Link href="/setup">Connect its collector</Link></>}
+            : block.provider === "all" ? <>No usage recorded yet from any harness. <Link href="/setup">Connect a collector</Link></>
+              : <>No {providerName(block.provider)} usage recorded yet. <Link href="/setup">Connect its collector</Link></>}
   </div>;
 });
 
@@ -184,6 +185,8 @@ export default function ReadmeEditor({ fontClass }: { fontClass: string }) {
   const [login, setLogin] = useState("");
   const [mode, setMode] = useState<"edit" | "preview">("edit");
   const [ready, setReady] = useState(false);
+  // A copy running on this computer (http) cannot serve images to GitHub.
+  const [localCopy, setLocalCopy] = useState(false);
   const [harnesses, setHarnesses] = useState<HarnessUsage[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -220,8 +223,11 @@ export default function ReadmeEditor({ fontClass }: { fontClass: string }) {
     const timer = setTimeout(() => {
       const draft = loadDraft();
       if (draft) { setBlocks(draft.blocks); setOrigin(draft.origin); setLogin(draft.login); }
+      // First visit: start from a ready-made README and show how it will look on GitHub.
+      else { setBlocks(starterReadme()); setMode("preview"); }
       // A deployed copy is already at the public address its cards will be served from.
       if (!draft?.origin && window.location.protocol === "https:") setOrigin(window.location.origin);
+      setLocalCopy(window.location.protocol !== "https:");
       setSampleNow(Date.now());
       setReady(true);
     }, 0);
@@ -292,19 +298,26 @@ export default function ReadmeEditor({ fontClass }: { fontClass: string }) {
     return () => { controller.abort(); clearTimeout(timer); window.removeEventListener("focus", look); };
   }, [cliOff, username]);
 
-  const snapshotOf = (provider: UsageProvider) => harnesses.find((h) => h.provider === provider)?.snapshot ?? null;
-  const errorOf = (provider: UsageProvider) => {
-    const message = harnesses.find((h) => h.provider === provider)?.error;
-    return failed || !message ? `Could not load ${providerName(provider)} usage. Try refresh.` : `${providerName(provider)}: ${message}`;
+  // "All" adds up every harness that has recorded history, exactly as the public card endpoint does.
+  const combined = useMemo(() => combineSnapshots(harnesses.flatMap((h) => (h.snapshot ? [h.snapshot] : []))), [harnesses]);
+  const snapshotOf = (provider: CardProvider) =>
+    provider === "all" ? combined : harnesses.find((h) => h.provider === provider)?.snapshot ?? null;
+  const errorOf = (provider: CardProvider) => {
+    const message = (provider === "all" ? harnesses.find((h) => h.error) : harnesses.find((h) => h.provider === provider))?.error;
+    const name = provider === "all" ? "your" : `${providerName(provider)}`;
+    return failed || !message ? `Could not load ${name} usage. Try refresh.` : provider === "all" ? message : `${providerName(provider)}: ${message}`;
   };
-  const statusOf = (provider: UsageProvider): Status =>
+  const statusOf = (provider: CardProvider): Status =>
     !loaded ? "loading" : locked ? "locked" : snapshotOf(provider) ? "ready"
-      : failed || harnesses.find((h) => h.provider === provider)?.error ? "error" : "empty";
+      : failed || (provider === "all" ? harnesses.some((h) => h.error) : harnesses.find((h) => h.provider === provider)?.error) ? "error" : "empty";
   const ranges = useMemo(() => rowRanges(blocks), [blocks]);
   // Thumbnails use your recorded usage; where a provider has none yet they use clearly labelled sample data.
-  const samples = useMemo(() => sampleNow === null ? null
-    : Object.fromEntries(PROVIDERS.map((p) => [p, sampleSnapshot(p, sampleNow)])) as Record<UsageProvider, UsageSnapshot>, [sampleNow]);
-  const thumbSource = (provider: UsageProvider) => {
+  const samples = useMemo(() => {
+    if (sampleNow === null) return null;
+    const each = Object.fromEntries(PROVIDERS.map((p) => [p, sampleSnapshot(p, sampleNow)])) as Record<UsageProvider, UsageSnapshot>;
+    return { ...each, all: combineSnapshots(Object.values(each)) } as Record<CardProvider, UsageSnapshot | null>;
+  }, [sampleNow]);
+  const thumbSource = (provider: CardProvider) => {
     const real = snapshotOf(provider);
     return real && hasHistory(real) ? { snapshot: real, sample: false } : { snapshot: samples?.[provider] ?? null, sample: true };
   };
@@ -347,10 +360,10 @@ export default function ReadmeEditor({ fontClass }: { fontClass: string }) {
     return () => { ignore = true; };
   }, [loaded, pairKey, harnesses]);
   const cardWarnings = useMemo(() => {
-    const issues = new Map<UsageProvider, ProbeIssue>();
+    const issues = new Map<CardProvider, ProbeIssue>();
     for (const pair of pairKey ? pairKey.split(",") : []) {
       const issue = probe[pair];
-      const provider = pair.split("|")[0] as UsageProvider;
+      const provider = pair.split("|")[0] as CardProvider;
       if (issue && issues.get(provider) !== "disabled") issues.set(provider, issue);
     }
     return [...issues];
@@ -698,7 +711,8 @@ export default function ReadmeEditor({ fontClass }: { fontClass: string }) {
                                           <span>Metrics</span>
                                           {cardMetrics.map((m) => (
                                             <label key={m}>
-                                              <input type="checkbox" checked={b.metrics.includes(m)} disabled={b.metrics.length === 1 && b.metrics.includes(m)}
+                                              <input type="checkbox" checked={b.metrics.includes(m)}
+                                                disabled={b.metrics.includes(m) ? b.metrics.length === 1 : b.metrics.length >= MAX_METRICS}
                                                 onChange={() => { patch(b.id, { metrics: cardMetrics.filter((x) => (x === m ? !b.metrics.includes(m) : b.metrics.includes(x))) }); edited(); }} />
                                               {METRIC_LABELS[m]}
                                             </label>
@@ -754,6 +768,12 @@ export default function ReadmeEditor({ fontClass }: { fontClass: string }) {
                       </>}
                     </p>
 
+                    {localCopy && output.originError && (
+                      <p className={e.help} role="note">
+                        You’re on your local copy. Enter your deployed site’s address so GitHub can load the images, or{" "}
+                        <Link href="/setup">deploy one first</Link>.
+                      </p>
+                    )}
                     <label htmlFor="readme-origin">Your deployed dashboard URL</label>
                     <div className={e.row}>
                       <input id="readme-origin" type="url" placeholder="https://your-instance.vercel.app" value={origin}
@@ -773,8 +793,8 @@ export default function ReadmeEditor({ fontClass }: { fontClass: string }) {
                       <ul className={e.warnings} aria-label="Publishing warnings">
                         {output.warnings.map((w, i) => <li key={`w${i}`}>{w}</li>)}
                         {cardWarnings.map(([provider, issue]) => issue === "disabled"
-                          ? <li key={provider}>{providerName(provider)}’s public card is disabled, so its images will not load on GitHub. <Link href="/setup">Enable it in the setup page.</Link></li>
-                          : <li key={provider}>No uploaded {providerName(provider)} snapshot yet, so its images will not load on GitHub until the collector syncs.</li>)}
+                          ? <li key={provider}>{provider === "all" ? "The public cards for every harness are disabled, so the All images" : `${providerName(provider)}’s public card is disabled, so its images`} will not load on GitHub. Remove the <code>PUBLIC_*_WIDGET=false</code> setting in Vercel and redeploy.</li>
+                          : <li key={provider}>No uploaded {provider === "all" ? "usage" : `${providerName(provider)} snapshot`} yet, so {provider === "all" ? "the All images" : "its images"} will not load on GitHub until the collector syncs.</li>)}
                       </ul>
                     )}
 

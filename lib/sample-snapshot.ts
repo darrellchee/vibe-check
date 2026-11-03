@@ -23,7 +23,7 @@ export function sampleSnapshot(provider: UsageProvider, now: number): UsageSnaps
     const inputTokens = Math.round(totalTokens * 0.62), outputTokens = totalTokens - inputTokens;
     daily.push({
       date: new Date(time).toISOString().slice(0, 10), models: [], totalTokens, inputTokens, outputTokens,
-      cachedInputTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, costUsd: 0, unpricedTokens: 0,
+      cachedInputTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, costUsd: Math.round(totalTokens / 1e6 * 140) / 100, unpricedTokens: 0,
       sessions: 1 + Math.floor(random() * 5), humanRequests: 4 + Math.floor(random() * 60), assistantRequests: 0,
     });
   }
@@ -35,7 +35,7 @@ export function sampleSnapshot(provider: UsageProvider, now: number): UsageSnaps
     totals: {
       totalTokens, inputTokens: sum((d) => d.inputTokens), outputTokens: sum((d) => d.outputTokens), cachedInputTokens: 0,
       cacheWriteTokens: 0, reasoningTokens: 0, sessions, humanRequests: sum((d) => d.humanRequests), assistantRequests: 0,
-      averageTokensPerSession: sessions ? Math.round(totalTokens / sessions) : 0, costUsd: 0, unpricedTokens: 0,
+      averageTokensPerSession: sessions ? Math.round(totalTokens / sessions) : 0, costUsd: sum((d) => d.costUsd), unpricedTokens: 0,
     },
     models: [], daily, hours: [], mostExpensiveDay: null, mostExpensive24h: null, pricing: { checkedAt: new Date(now).toISOString(), sources: [] },
   };

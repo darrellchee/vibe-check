@@ -60,8 +60,8 @@ fs.chmodSync(".env.local",0o600);
 npm run collector:install --silent -- --provider all
 echo
 echo "Done. Your usage now syncs automatically while this computer is on."
-echo "Dashboard:  $SITE"
-echo "Next step:  open $SITE/share to copy the Markdown for your GitHub profile README."
+echo "Next step:  go back to the setup page in your browser; it moves on by itself once your first upload lands."
+echo "            ($SITE/setup)"
 `;
 
 const SITE_PATTERN = /^(https:\/\/[a-z0-9.-]+(:\d+)?|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?)$/i;
