@@ -13,12 +13,14 @@ const POLL_MS = 5_000;
 
 const installCommand = ({ origin, code }: Connect) => `curl -fsSL ${origin}/api/install | sh -s -- ${code}`;
 
-// Whether this browser is signed in, and whether any provider has uploaded usage yet.
+// Whether this browser is signed in, and whether any provider has uploaded usage yet. Usage is only
+// read on a claimed deployment: no other step depends on it, and on a local copy it means parsing
+// every provider's whole history, which can take a while on a cold start.
 async function readState() {
-  const [status, usage] = await Promise.all([
-    fetch("/api/setup/status", { cache: "no-store" }).then((r) => r.json() as Promise<SetupState>),
-    loadHarnesses(),
-  ]);
+  const status = await fetch("/api/setup/status", { cache: "no-store" }).then((r) => r.json() as Promise<SetupState>);
+  if (!status.cloud || status.storage !== "ok" || !status.claimed)
+    return { status, signedIn: false, hasData: false };
+  const usage = await loadHarnesses();
   return {
     status,
     signedIn: !usage.locked,
