@@ -52,8 +52,8 @@ TOKEN=$(printf %s "$RESPONSE" | node -e 'let s="";process.stdin.on("data",d=>s+=
 }
 SITE="$SITE" TOKEN="$TOKEN" node -e '
 const fs=require("fs");
-const keep=(fs.existsSync(".env.local")?fs.readFileSync(".env.local","utf8").split("\n"):[]).filter(l=>l&&!/^(ATLAS_MODE|SYNC_URL|SYNC_TOKEN)=/.test(l));
-keep.push("ATLAS_MODE=local","SYNC_URL="+process.env.SITE,"SYNC_TOKEN="+process.env.TOKEN);
+const keep=(fs.existsSync(".env.local")?fs.readFileSync(".env.local","utf8").split("\n"):[]).filter(l=>l&&!/^(VIBE_CHECK_MODE|SYNC_URL|SYNC_TOKEN)=/.test(l));
+keep.push("VIBE_CHECK_MODE=local","SYNC_URL="+process.env.SITE,"SYNC_TOKEN="+process.env.TOKEN);
 fs.writeFileSync(".env.local",keep.join("\n")+"\n",{mode:0o600});
 fs.chmodSync(".env.local",0o600);
 '

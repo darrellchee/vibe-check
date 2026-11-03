@@ -1,10 +1,13 @@
 "use client";
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowRight, Check, Copy, ExternalLink } from "lucide-react";
+import { chooseLocalDashboard } from "@/lib/local-dashboard";
 import { hasHistory, loadHarnesses } from "@/lib/overview";
 import { deploymentUrl, profileEmbed } from "@/lib/profile-card";
-import { deployRedirectTarget, SETUP_STEPS, setupStep } from "@/lib/setup-flow";
+import { DEPLOY_CHANNEL, DEPLOY_PENDING_KEY, deployRedirectTarget, readDeployMessage, SETUP_STEPS, setupStep } from "@/lib/setup-flow";
+import { DEFAULT_STORAGE, marketplaceUrl, STORAGE_PROVIDERS, type StorageProviderId } from "@/lib/storage-providers";
 import type { SetupState } from "@/lib/instance";
 import s from "./setup.module.css";
 
@@ -12,6 +15,18 @@ type Connect = { code: string; origin: string; password?: string };
 const POLL_MS = 5_000;
 
 const installCommand = ({ origin, code }: Connect) => `curl -fsSL ${origin}/api/install | sh -s -- ${code}`;
+
+// How long the tab Vercel returns to waits for the setup tab to answer before moving on itself.
+const HANDOFF_MS = 800;
+const channel = () => (typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(DEPLOY_CHANNEL));
+// "Waiting for your deployment" survives a reload of the setup tab, for this browser session only.
+const pending = {
+  get: () => { try { return window.sessionStorage.getItem(DEPLOY_PENDING_KEY) === "1"; } catch { return false; } },
+  set: (on: boolean) => {
+    try { if (on) window.sessionStorage.setItem(DEPLOY_PENDING_KEY, "1"); else window.sessionStorage.removeItem(DEPLOY_PENDING_KEY); }
+    catch { /* Storage blocked: the waiting screen just won't survive a reload. */ }
+  },
+};
 
 // Whether this browser is signed in, and whether any provider has uploaded usage yet. Usage is only
 // read on a claimed deployment: no other step depends on it, and on a local copy it means parsing
@@ -61,6 +76,7 @@ function Step({ step, title, lead, children }: { step: number; title: string; le
 }
 
 export default function Setup() {
+  const router = useRouter();
   const [status, setStatus] = useState<SetupState | null>(null);
   const [signedIn, setSignedIn] = useState(false);
   const [hasData, setHasData] = useState(false);
@@ -71,6 +87,11 @@ export default function Setup() {
   const [password, setPassword] = useState("");
   const [here, setHere] = useState("");
   const [manual, setManual] = useState<string | null>(null);
+  const [storage, setStorage] = useState<StorageProviderId>(DEFAULT_STORAGE);
+  // Deploy pressed: Vercel is open in another tab and this one waits for it to finish.
+  const [deploying, setDeploying] = useState(false);
+  // This tab is the one Vercel sent back; the setup tab took over, so it only says so.
+  const [handedOff, setHandedOff] = useState<string | null>(null);
   const { copied, copy } = useCopy();
 
   const load = useCallback(async () => {
@@ -85,19 +106,63 @@ export default function Setup() {
     }
   }, []);
 
-  // Coming back from Vercel's deploy flow: carry on at the new site's setup page.
+  // Coming back from Vercel's deploy flow. If the setup tab is still open and waiting, hand over to
+  // it (it moves on to the new site) and close this tab; otherwise carry on at the new site here.
   useEffect(() => {
     const target = deployRedirectTarget(new URLSearchParams(window.location.search).get("deployment-url"));
     if (target) {
-      window.location.replace(target);
-      return;
+      pending.set(false);
+      const bus = channel();
+      if (!bus) {
+        window.location.replace(target);
+        return;
+      }
+      let answered = false;
+      bus.onmessage = (event) => {
+        if (readDeployMessage(event.data)?.type !== "taken" || answered) return;
+        answered = true;
+        setHandedOff(target);
+        window.close(); // Allowed for the tab the setup page opened; otherwise the message below stays.
+      };
+      bus.postMessage({ type: "deployed", target });
+      const timer = setTimeout(() => { if (!answered) window.location.replace(target); }, HANDOFF_MS);
+      return () => { clearTimeout(timer); bus.close(); };
     }
     const timer = setTimeout(() => {
       setHere(window.location.origin);
+      setDeploying(pending.get());
       void load();
     }, 0);
     return () => clearTimeout(timer);
   }, [load]);
+
+  // The waiting tab: when Vercel's tab reports the new site, answer it and move on to that site.
+  useEffect(() => {
+    if (!deploying) return;
+    const bus = channel();
+    if (!bus) return;
+    bus.onmessage = (event) => {
+      const message = readDeployMessage(event.data);
+      if (message?.type !== "deployed") return;
+      bus.postMessage({ type: "taken" });
+      pending.set(false);
+      window.location.assign(message.target);
+    };
+    return () => bus.close();
+  }, [deploying]);
+
+  function startDeploy() {
+    const link = deploymentUrl(undefined, { storage, redirect: `${window.location.origin}/setup` });
+    pending.set(true);
+    setDeploying(true);
+    // A new tab keeps this one waiting. "noopener" keeps vercel.com from reaching back into this page.
+    window.open(link, "_blank", "noopener");
+  }
+  function stopWaiting() {
+    pending.set(false);
+    setDeploying(false);
+    setManual(null);
+  }
 
   const current = status ? setupStep(status, { signedIn, hasData, connecting }) : null;
 
@@ -168,11 +233,27 @@ export default function Setup() {
       setError(e instanceof Error ? e.message : "Enter your site address, like my-site.vercel.app.");
       return;
     }
+    pending.set(false);
     // Another site entirely, so a full navigation rather than the client router.
     window.location.assign(new URL("/setup", origin).href);
   }
 
   const notice = error ? <p className={s.error} role="alert">{error}</p> : null;
+  const siteForm = (
+    <form className={s.inline} onSubmit={openSite}>
+      <input className={s.input} value={manual ?? ""} onChange={(e) => { setManual(e.target.value); setError(""); }}
+        placeholder="my-site.vercel.app" aria-label="Your deployed site address" inputMode="url" />
+      <button className={s.secondary} type="submit">Continue</button>
+    </form>
+  );
+
+  if (handedOff) {
+    return (
+      <Step step={2} title="Your site is deployed" lead="Setup continues in your other tab. You can close this one.">
+        <a className={s.secondary} href={handedOff}>Continue here instead <ArrowRight size={16} /></a>
+      </Step>
+    );
+  }
 
   if (!current) {
     return (
@@ -183,32 +264,62 @@ export default function Setup() {
     );
   }
 
+  if (current.view === "deploy" && deploying) {
+    return (
+      <Step step={1} title="Waiting for your deployment" lead="Finish deploying in the Vercel tab. When it’s done, this page moves on by itself.">
+        <p className={s.waiting} role="status"><span className={s.pulse} aria-hidden="true" /> Waiting for Vercel…</p>
+        <button className={s.secondary} onClick={startDeploy}>Open Vercel again <ExternalLink size={16} /></button>
+        <p className={s.hint}>
+          When Vercel says your project is deployed, use its button to return here. If you left Vercel another way,
+          enter the address it gave your site:
+        </p>
+        {siteForm}
+        {notice}
+        <button className={s.link} onClick={stopWaiting}>Back</button>
+      </Step>
+    );
+  }
+
   if (current.view === "deploy") {
     return (
       <Step step={1} title="Deploy your own copy" lead="Vercel copies this project to your GitHub and creates a free database. It takes about a minute.">
-        <a className={s.primary} href={here ? deploymentUrl(undefined, { redirect: `${here}/setup` }) : deploymentUrl()}>
+        <fieldset className={s.choices}>
+          <legend className={s.secretLabel}>Database</legend>
+          {STORAGE_PROVIDERS.map((provider) => (
+            <label key={provider.id} className={s.choice}>
+              <input type="radio" name="storage" value={provider.id} checked={storage === provider.id}
+                onChange={() => setStorage(provider.id)} />
+              <span className={s.choiceName}>{provider.name}</span>
+              <span className={s.choiceNote}>{provider.free}</span>
+            </label>
+          ))}
+        </fieldset>
+        <button className={s.primary} onClick={startDeploy} disabled={!here}>
           Deploy to Vercel <ExternalLink size={16} />
-        </a>
+        </button>
+        <p className={s.hint}>Used up a free plan already? Pick another, or connect a database you already have when Vercel asks.</p>
         {notice}
         {manual === null ? (
           <button className={s.link} onClick={() => setManual("")}>Already deployed? Enter your site address</button>
-        ) : (
-          <form className={s.inline} onSubmit={openSite}>
-            <input className={s.input} value={manual} onChange={(e) => { setManual(e.target.value); setError(""); }}
-              placeholder="my-site.vercel.app" aria-label="Your deployed site address" autoFocus inputMode="url" />
-            <button className={s.secondary} type="submit">Continue</button>
-          </form>
-        )}
+        ) : siteForm}
+        <button className={s.link} onClick={() => { chooseLocalDashboard(); router.push("/"); }}>
+          Visit dashboard on this computer
+        </button>
       </Step>
     );
   }
 
   if (current.view === "storage") {
     return (
-      <Step step={1} title="Connect your database" lead="In Vercel, open Storage, add Upstash for Redis to this project, then redeploy.">
-        <a className={s.primary} href="https://vercel.com/dashboard" target="_blank" rel="noreferrer">
-          Open Vercel <ExternalLink size={16} />
-        </a>
+      <Step step={1} title="Connect your database" lead="Add any one of these free databases to this project in Vercel, then redeploy.">
+        <div className={s.providers}>
+          {STORAGE_PROVIDERS.map((provider) => (
+            <a key={provider.id} className={s.secondary} href={marketplaceUrl(provider)} target="_blank" rel="noreferrer">
+              {provider.name} <ExternalLink size={14} />
+            </a>
+          ))}
+        </div>
+        <p className={s.hint}>Choose your vibe-check project when Vercel asks where to connect it. Another Redis or Postgres host works too: set REDIS_URL or DATABASE_URL yourself.</p>
         {notice}
         <button className={s.link} onClick={() => void load()}>I’ve done it, check again</button>
       </Step>

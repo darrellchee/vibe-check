@@ -30,7 +30,7 @@ export async function GET(request?: Request) {
           : provider === "antigravity"
             ? "Antigravity"
             : "Codex";
-    const title = `${provider.toUpperCase()} ATLAS`;
+    const title = `${provider.toUpperCase()} VIBE CHECK`;
     // Only formatted numeric summaries reach the public SVG, never source strings or identifiers.
     const tokens =
         s.availability?.tokens === false

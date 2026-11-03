@@ -1,6 +1,6 @@
 import { CARD_PROVIDERS, isCardProvider, providerName } from "./providers";
-import { calendarEmbed, cardAccents, cardMetrics, cardStyles, calendarStyles, profileEmbed, providerAccent,
-  type CardAccent, type CardMetric, type CardStyle, type CardTheme } from "./profile-card";
+import { cardAccents, cardAnimations, cardFonts, cardMetrics, cleanCardText, LABEL_MAX, TITLE_MAX, maxMetrics, providerAccent, stylesFor, trendDays, widgetEmbed,
+  type CardAccent, type CardAnimation, type CardBorder, type CardFont, type CardMetric, type CardStyle, type MetricLabels, type CardTheme, type HarnessChart, type TrendDays, type TrendMeasure } from "./profile-card";
 import type { CardProvider } from "./types";
 
 // The README is an ordered list of blocks: free Markdown text, or a widget that becomes an image
@@ -9,23 +9,54 @@ import type { CardProvider } from "./types";
 // Widgets can be resized (`width`, in CSS pixels) and placed side by side: neighbouring widgets that
 // share a `row` id form one row. A row is derived from the list, never stored separately, so moving or
 // removing a block can't leave the layout inconsistent. Text is always a row of its own.
+// "auto" follows each viewer's GitHub theme: the README holds a dark and a light image and GitHub shows
+// the one matching the viewer (see `themedImage`).
+export type BlockTheme = CardTheme | "auto";
+// A card with no border has no background, so a fixed theme's text would vanish on GitHub's other theme.
+// It always follows the viewer.
+export const themeOf = (b: { theme: BlockTheme; border?: CardBorder }): BlockTheme => (b.border === "none" ? "auto" : b.theme);
+// What every card block has: its data source, theme, look and size.
+interface CardFields { provider: CardProvider; theme: BlockTheme; style?: CardStyle; accent?: CardAccent; font?: CardFont; border?: CardBorder; animation?: CardAnimation; title?: string; width?: number; row?: string }
 export type ReadmeBlock =
   | { id: string; type: "text"; text: string }
-  | { id: string; type: "usage"; provider: CardProvider; theme: CardTheme; metrics: CardMetric[]; style?: CardStyle; accent?: CardAccent; width?: number; row?: string }
-  | { id: string; type: "calendar"; provider: CardProvider; theme: CardTheme; style?: CardStyle; accent?: CardAccent; width?: number; row?: string };
-export type NewBlock = ReadmeBlock extends infer B ? (B extends { id: string } ? Omit<B, "id"> : never) : never;
+  | ({ id: string; type: "usage"; metrics: CardMetric[]; labels?: MetricLabels } & CardFields)
+  | ({ id: string; type: "calendar" } & CardFields)
+  | ({ id: string; type: "trend"; days?: TrendDays; measure?: TrendMeasure } & CardFields)
+  | ({ id: string; type: "models" } & CardFields)
+  | ({ id: string; type: "ledger" } & CardFields)
+  | ({ id: string; type: "harnesses"; chart?: HarnessChart } & CardFields);
+export type CardBlock = Exclude<ReadmeBlock, { type: "text" }>;
+// The options the card endpoint needs to draw a block.
+export const cardRequest = (b: CardBlock) => ({
+  kind: b.type, style: b.style, accent: b.accent, font: b.font, border: b.border, animation: b.animation, title: b.title,
+  ...(b.type === "usage" ? { metrics: b.metrics, labels: b.labels } : {}), ...(b.type === "trend" ? { days: b.days, measure: b.measure } : {}),
+  ...(b.type === "harnesses" ? { chart: b.chart } : {}),
+});
+// A usage card's metrics, in the order the card lays them out. Turning one on adds it at the end;
+// turning one off keeps the others in place.
+export const toggleMetric = (metrics: CardMetric[], metric: CardMetric) =>
+  metrics.includes(metric) ? metrics.filter((m) => m !== metric) : [...metrics, metric];
+// Move the metric at `from` so it ends up at position `to` (both indexes into the current list).
+export function moveMetric(metrics: CardMetric[], from: number, to: number) {
+  if (from < 0 || from >= metrics.length) return metrics;
+  const at = Math.max(0, Math.min(to, metrics.length - 1));
+  if (at === from) return metrics;
+  const next = [...metrics];
+  next.splice(at, 0, next.splice(from, 1)[0]);
+  return next;
+}
+export type NewBlock =ReadmeBlock extends infer B ? (B extends { id: string } ? Omit<B, "id"> : never) : never;
 
-export type PresetGroup = "Usage cards" | "Activity calendars" | "Markdown";
+export type PresetGroup = "Usage cards" | "Activity calendars" | "Usage trends" | "Model mix" | "Model ledgers" | "Usage by harness" | "Markdown";
 // Card presets belong to a provider and name their look (`variant`); Markdown presets have neither.
 export interface Preset { id: string; group: PresetGroup; title: string; hint: string; block: NewBlock; provider?: CardProvider; variant?: string }
-export const PRESET_GROUPS: PresetGroup[] = ["Usage cards", "Activity calendars", "Markdown"];
+export const PRESET_GROUPS: PresetGroup[] = ["Usage cards", "Activity calendars", "Usage trends", "Model mix", "Model ledgers", "Usage by harness", "Markdown"];
 
-type CardBlock = Exclude<NewBlock, { type: "text" }>;
-const USAGE_LOOKS: { variant: string; hint: string; look: (accent: CardAccent) => Partial<Extract<CardBlock, { type: "usage" }>> }[] = [
+type NewCard = Exclude<NewBlock, { type: "text" }>;
+const USAGE_LOOKS: { variant: string; hint: string; look: (accent: CardAccent) => Partial<Extract<NewCard, { type: "usage" }>> }[] = [
   { variant: "Classic", hint: "Tokens and sessions", look: (accent) => ({ accent, metrics: ["tokens", "sessions"] }) },
   { variant: "Compact", hint: "One slim row, three metrics", look: (accent) => ({ accent, style: "compact", metrics: ["tokens", "sessions", "requests"] }) },
   { variant: "Spotlight", hint: "One big number", look: (accent) => ({ accent, style: "spotlight", metrics: ["tokens", "sessions"] }) },
-  { variant: "Light", hint: "Classic on a light background", look: (accent) => ({ accent, theme: "light", metrics: ["tokens", "sessions", "requests"] }) },
 ];
 // "All" adds up every harness and leads with the headline figures: tokens, sessions and the estimated
 // (API-equivalent) cost.
@@ -33,23 +64,36 @@ const ALL_USAGE_LOOKS: typeof USAGE_LOOKS = [
   { variant: "Classic", hint: "Tokens, sessions and estimated cost", look: (accent) => ({ accent, metrics: ["tokens", "sessions", "cost"] }) },
   { variant: "Compact", hint: "One slim row, three metrics", look: (accent) => ({ accent, style: "compact", metrics: ["tokens", "sessions", "cost"] }) },
   { variant: "Spotlight", hint: "One big number, with sessions and cost", look: (accent) => ({ accent, style: "spotlight", metrics: ["tokens", "sessions", "cost"] }) },
-  { variant: "Light", hint: "Classic on a light background", look: (accent) => ({ accent, theme: "light", metrics: ["tokens", "sessions", "cost"] }) },
 ];
-const CALENDAR_LOOKS: { variant: string; hint: string; look: (accent: CardAccent) => Partial<Extract<CardBlock, { type: "calendar" }>> }[] = [
+const CALENDAR_LOOKS: { variant: string; hint: string; look: (accent: CardAccent) => Partial<Extract<NewCard, { type: "calendar" }>> }[] = [
   { variant: "Classic", hint: "Last 12 months", look: (accent) => ({ accent }) },
   { variant: "Compact", hint: "Just the heatmap", look: (accent) => ({ accent, style: "compact" }) },
-  { variant: "Light", hint: "Last 12 months, light", look: (accent) => ({ accent, theme: "light" }) },
+];
+// The newer kinds share one shape: a Classic and a Compact look.
+const CHART_KINDS: { type: "trend" | "models" | "ledger"; group: PresetGroup; classic: string; compact: string }[] = [
+  { type: "trend", group: "Usage trends", classic: "Daily tokens, last 90 days", compact: "Just the chart" },
+  { type: "models", group: "Model mix", classic: "Top 5 models and the rest", compact: "Top 3 models" },
+  { type: "ledger", group: "Model ledgers", classic: "Input, cached, output and cost", compact: "Tokens and cost" },
 ];
 
 export const PRESETS: Preset[] = [
   ...CARD_PROVIDERS.flatMap((provider) => (provider === "all" ? ALL_USAGE_LOOKS : USAGE_LOOKS).map(({ variant, hint, look }): Preset => ({
     id: `usage-${provider}-${variant.toLowerCase()}`, group: "Usage cards", title: providerName(provider), variant, hint, provider,
-    block: { type: "usage", provider, theme: "dark", metrics: ["tokens", "sessions"], ...look(providerAccent[provider]) },
+    block: { type: "usage", provider, theme: "auto", metrics: ["tokens", "sessions"], ...look(providerAccent[provider]) },
   }))),
   ...CARD_PROVIDERS.flatMap((provider) => CALENDAR_LOOKS.map(({ variant, hint, look }): Preset => ({
     id: `calendar-${provider}-${variant.toLowerCase()}`, group: "Activity calendars", title: providerName(provider), variant, hint, provider,
-    block: { type: "calendar", provider, theme: "dark", ...look(providerAccent[provider]) },
+    block: { type: "calendar", provider, theme: "auto", ...look(providerAccent[provider]) },
   }))),
+  ...CHART_KINDS.flatMap(({ type, group, classic, compact }) => CARD_PROVIDERS.flatMap((provider) => (["Classic", "Compact"] as const).map((variant): Preset => ({
+    id: `${type}-${provider}-${variant.toLowerCase()}`, group, title: providerName(provider), variant, hint: variant === "Classic" ? classic : compact, provider,
+    block: { type, provider, theme: "auto", accent: providerAccent[provider], ...(variant === "Compact" ? { style: "compact" as const } : {}) },
+  })))),
+  // How usage splits across harnesses only makes sense for All, in two variants.
+  ...([["Bar", "Bar graph", "One bar per harness"], ["Pie", "Pie chart", "Slices with a legend"]] as const).map(([variant, title, hint]): Preset => ({
+    id: `harnesses-all-${variant.toLowerCase()}`, group: "Usage by harness", title, variant, hint, provider: "all",
+    block: { type: "harnesses", provider: "all", theme: "auto", accent: providerAccent.all, ...(variant === "Pie" ? { chart: "pie" as const } : {}) },
+  })),
   { id: "heading", group: "Markdown", title: "Heading", hint: "Section title", block: { type: "text", text: "## What I build with AI" } },
   { id: "paragraph", group: "Markdown", title: "Paragraph", hint: "A few sentences", block: { type: "text", text: "I use AI coding tools every day. Here is what my recorded usage looks like." } },
   { id: "list", group: "Markdown", title: "Bullet list", hint: "Tools you use", block: { type: "text", text: "- Codex\n- Claude Code\n- Cursor\n- Antigravity" } },
@@ -90,7 +134,7 @@ export function moveBlock(blocks: ReadmeBlock[], id: string, to: number) {
 
 // ───────── Size and rows ─────────
 // Native sizes of the SVGs, and the width GitHub gives a README (about 800px of a profile column).
-export const NATIVE_WIDTH = { usage: 560, calendar: 720 } as const;
+export const NATIVE_WIDTH = { usage: 560, calendar: 720, trend: 720, models: 560, ledger: 720, harnesses: 560 } as const;
 export const MIN_WIDTH = 200, MAX_WIDTH = 800, ROW_BUDGET = 800, ROW_GAP = 8;
 
 export const widthOf = (b: ReadmeBlock) => (b.type === "text" ? 0 : b.width ?? NATIVE_WIDTH[b.type]);
@@ -129,6 +173,23 @@ function fitRow(blocks: ReadmeBlock[], id: string): ReadmeBlock[] {
   if (total <= ROW_BUDGET) return blocks;
   const share = Math.max(MIN_WIDTH, Math.floor((ROW_BUDGET - ROW_GAP * (count - 1)) / count / 10) * 10);
   return blocks.map((b, i) => (i >= range.start && i < range.end ? withWidth(b, share) : b));
+}
+
+// The widest a card may get before its row would be wider than the README. A card on its own can
+// use the full width; in a row it gets what its neighbours leave, never less than the minimum.
+export function maxWidthFor(blocks: ReadmeBlock[], id: string) {
+  const at = blocks.findIndex((b) => b.id === id);
+  const range = rowRanges(blocks).find((r) => at >= r.start && at < r.end);
+  if (!range || range.end - range.start < 2) return MAX_WIDTH;
+  const members = blocks.slice(range.start, range.end);
+  const others = members.reduce((sum, b) => (b.id === id ? sum : sum + widthOf(b)), 0) + ROW_GAP * (members.length - 1);
+  return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.floor((ROW_BUDGET - others) / 10) * 10));
+}
+
+// Resize one card: snapped to 10px steps and held to the room its row has left.
+export function resizeBlock(blocks: ReadmeBlock[], id: string, width: number): ReadmeBlock[] {
+  const next = Math.min(snapWidth(width), maxWidthFor(blocks, id));
+  return blocks.map((b) => (b.id === id && b.type !== "text" ? { ...b, width: next } : b)) as ReadmeBlock[];
 }
 
 // A drop is either a slot between rows (an index into the current list) or beside an existing card.
@@ -220,23 +281,31 @@ export function serializeReadme(blocks: ReadmeBlock[], origin: string) {
   const hasWidgets = blocks.some((b) => b.type !== "text");
   let base = origin, originError = "";
   if (hasWidgets) {
-    try { profileEmbed(origin, "codex", "dark", ["tokens"]); }
+    try { widgetEmbed(origin, "codex", "dark", { kind: "usage", metrics: ["tokens"] }); }
     catch (error) { originError = (error as Error).message; base = PLACEHOLDER_ORIGIN; }
   }
-  const embed = (b: Exclude<ReadmeBlock, { type: "text" }>) =>
-    b.type === "usage" ? profileEmbed(base, b.provider, b.theme, b.metrics, { style: b.style, accent: b.accent })
-      : calendarEmbed(base, b.provider, b.theme, { style: b.style, accent: b.accent });
+  const embed = (b: CardBlock, theme: CardTheme) => widgetEmbed(base, b.provider, theme, cardRequest(b));
+  // An "auto" card is a <picture>: GitHub shows the dark source to viewers using a dark theme and the
+  // light image to everyone else (GitHub's documented way to theme README images).
+  const themedImage = (b: CardBlock, indent: string) => {
+    const theme = themeOf(b);
+    const light = embed(b, theme === "auto" ? "light" : theme);
+    const img = `<img src="${attribute(light.image)}" alt="${attribute(light.alt)}"${b.width === undefined ? "" : ` width="${b.width}"`}>`;
+    if (theme !== "auto") return `${indent}${img}`;
+    const dark = embed(b, "dark");
+    return [`${indent}<picture>`, `${indent}  <source media="(prefers-color-scheme: dark)" srcset="${attribute(dark.image)}">`,
+      `${indent}  ${img}`, `${indent}</picture>`].join("\n");
+  };
   // Markdown images cannot carry a size or share a line, so resized and side-by-side cards become
   // <img> tags in one paragraph. GitHub keeps width and flows adjacent inline images side by side.
   const parts = rowRanges(blocks).map(({ start, end }) => {
     const row = blocks.slice(start, end);
     const first = row[0];
     if (first.type === "text") return tidyText(first.text);
-    const cards = (row as Exclude<ReadmeBlock, { type: "text" }>[]).map((b) => ({ b, e: embed(b) }));
-    if (cards.length === 1 && cards[0].b.width === undefined) return cards[0].e.markdown;
-    const images = cards.map(({ b, e }) =>
-      `  <img src="${attribute(e.image)}" alt="${attribute(e.alt)}"${b.width === undefined ? "" : ` width="${b.width}"`}>`);
-    return `<p>\n${images.join("\n")}\n</p>`;
+    const cards = row as CardBlock[];
+    const only = cards.length === 1 && cards[0].width === undefined ? cards[0] : null;
+    if (only) return themeOf(only) === "auto" ? themedImage(only, "") : embed(only, themeOf(only) as CardTheme).markdown;
+    return `<p>\n${cards.map((b) => themedImage(b, "  ")).join("\n")}\n</p>`;
   }).filter(Boolean);
   const markdown = parts.length ? `${parts.join("\n\n")}\n` : "";
   const warnings: string[] = [];
@@ -245,7 +314,7 @@ export function serializeReadme(blocks: ReadmeBlock[], origin: string) {
   return { markdown, originError, warnings };
 }
 
-const isTheme = (v: unknown): v is CardTheme => v === "dark" || v === "light";
+const isTheme = (v: unknown): v is BlockTheme => v === "dark" || v === "light" || v === "auto";
 // Cut at MAX_TEXT without leaving half of a surrogate pair behind.
 const clipText = (text: string) => {
   const clipped = text.slice(0, MAX_TEXT), last = clipped.charCodeAt(clipped.length - 1);
@@ -266,18 +335,40 @@ export function sanitizeBlocks(value: unknown): ReadmeBlock[] {
       ...(typeof b.width === "number" && Number.isInteger(b.width) && b.width >= MIN_WIDTH && b.width <= MAX_WIDTH ? { width: b.width } : {}),
       ...(typeof b.row === "string" && b.row && b.row.length <= 64 ? { row: b.row } : {}),
     };
-    const look = (styles: CardStyle[]) => ({
-      ...(styles.includes(b.style as CardStyle) && b.style !== "classic" ? { style: b.style as CardStyle } : {}),
+    // "transparent" was a style before borders existed: it is now a classic (calendars: compact) card without a border.
+    const legacyClear = b.style === "transparent";
+    const look = (styles: CardStyle[], legacyStyle: CardStyle) => ({
+      ...(legacyClear ? (legacyStyle === "classic" ? {} : { style: legacyStyle }) : styles.includes(b.style as CardStyle) && b.style !== "classic" ? { style: b.style as CardStyle } : {}),
+      ...(legacyClear || b.border === "none" ? { border: "none" as const } : {}),
       ...(cardAccents.includes(b.accent as CardAccent) ? { accent: b.accent as CardAccent } : {}),
+      ...(cardFonts.includes(b.font as CardFont) && b.font !== "system" ? { font: b.font as CardFont } : {}),
+      ...(cardAnimations.includes(b.animation as CardAnimation) && b.animation !== "none" ? { animation: b.animation as CardAnimation } : {}),
+      ...(cleanCardText(b.title, TITLE_MAX) ? { title: cleanCardText(b.title, TITLE_MAX) } : {}),
     });
     if (b.type === "text" && typeof b.text === "string") out.push({ id: b.id, type: "text", text: clipText(b.text) });
     else if (b.type === "usage" && isCardProvider(b.provider) && isTheme(b.theme) && Array.isArray(b.metrics)) {
-      const metrics = cardMetrics.filter((m) => (b.metrics as unknown[]).includes(m));
+      // The stored order is the card's layout order, so it is kept (duplicates and unknown names dropped).
+      const metrics = [...new Set((b.metrics as unknown[]).filter((m): m is CardMetric => cardMetrics.includes(m as CardMetric)))].slice(0, maxMetrics(b.provider));
       if (!metrics.length) continue;
-      out.push({ id: b.id, type: "usage", provider: b.provider, theme: b.theme, metrics, ...look(cardStyles), ...layout });
-    } else if (b.type === "calendar" && isCardProvider(b.provider) && isTheme(b.theme))
-      out.push({ id: b.id, type: "calendar", provider: b.provider, theme: b.theme, ...look(calendarStyles), ...layout });
-    else continue;
+      const style = look(stylesFor("usage"), "classic");
+      // Labels are kept only for known metrics, cleaned; an empty one means the default.
+      const given = b.labels && typeof b.labels === "object" ? b.labels as Record<string, unknown> : {};
+      const labels = Object.fromEntries(cardMetrics.flatMap((m) => (cleanCardText(given[m], LABEL_MAX) ? [[m, cleanCardText(given[m], LABEL_MAX)]] : []))) as MetricLabels;
+      out.push({ id: b.id, type: "usage", provider: b.provider, theme: themeOf({ theme: b.theme, ...style }), metrics, ...(Object.keys(labels).length ? { labels } : {}), ...style, ...layout });
+    } else if (b.type === "calendar" && isCardProvider(b.provider) && isTheme(b.theme)) {
+      const style = look(stylesFor("calendar"), "compact");
+      out.push({ id: b.id, type: "calendar", provider: b.provider, theme: themeOf({ theme: b.theme, ...style }), ...style, ...layout });
+    } else if ((b.type === "trend" || b.type === "models" || b.type === "ledger") && isCardProvider(b.provider) && isTheme(b.theme)) {
+      const style = look(stylesFor(b.type), "classic"), base = { id: b.id, provider: b.provider, theme: themeOf({ theme: b.theme, ...style }), ...style, ...layout };
+      if (b.type === "trend") out.push({ ...base, type: "trend",
+        ...(trendDays.includes(b.days as TrendDays) && b.days !== 90 ? { days: b.days as TrendDays } : {}),
+        ...(b.measure === "cost" ? { measure: "cost" as const } : {}) });
+      else out.push({ ...base, type: b.type });
+    } else if (b.type === "harnesses" && b.provider === "all" && isTheme(b.theme)) {
+      const style = look(stylesFor("harnesses"), "classic");
+      out.push({ id: b.id, type: "harnesses", provider: "all", theme: themeOf({ theme: b.theme, ...style }), ...style, ...layout,
+        ...(b.chart === "pie" ? { chart: "pie" as const } : {}) });
+    } else continue;
     seen.add(b.id);
   }
   return out;

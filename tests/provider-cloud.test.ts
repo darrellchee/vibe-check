@@ -14,7 +14,7 @@ import type { UsageSnapshot } from "../lib/types";
 
 async function legacySnapshot() {
   const snapshot = await collectUsage(
-    path.join(tmpdir(), `atlas-provider-missing-${randomUUID()}`),
+    path.join(tmpdir(), `vibe-check-provider-missing-${randomUUID()}`),
   );
   delete snapshot.provider;
   return snapshot;
@@ -75,7 +75,7 @@ test("snapshot provider validation accepts legacy Codex and official Anthropic s
 test("cloud providers use independent storage, private reads and separate public widget opt-ins", async () => {
   const env: Record<string, string | undefined> = process.env;
   const settings = {
-    ATLAS_MODE: "cloud",
+    VIBE_CHECK_MODE: "cloud",
     SYNC_TOKEN: "provider-qa-fixture-token-123456789012345",
     DASHBOARD_PASSWORD: "provider-qa-password",
     UPSTASH_REDIS_REST_URL: "https://provider-storage.example",
@@ -135,8 +135,8 @@ test("cloud providers use independent storage, private reads and separate public
       200,
     );
     assert.deepEqual([...stored.keys()].sort(), [
-      "claude-atlas:snapshot:v1",
-      "codex-atlas:snapshot:v1",
+      "claude-vibe-check:snapshot:v1",
+      "codex-vibe-check:snapshot:v1",
     ]);
     assert.equal((await ingest(upload(codex, "?provider=claude"))).status, 400);
     assert.equal((await ingest(upload(claude))).status, 400);
@@ -153,7 +153,7 @@ test("cloud providers use independent storage, private reads and separate public
       new Request(`https://dashboard.example/api/usage${query}`, {
         headers: authenticated
           ? {
-              cookie: `atlas_session=${sessionToken(settings.DASHBOARD_PASSWORD)}`,
+              cookie: `vibe_check_session=${sessionToken(settings.DASHBOARD_PASSWORD)}`,
             }
           : {},
       });
@@ -181,11 +181,11 @@ test("cloud providers use independent storage, private reads and separate public
     const claudeBadge = await badge("?provider=claude");
     assert.equal(claudeBadge.status, 200);
     const svg = await claudeBadge.text();
-    assert.ok(svg.includes("CLAUDE ATLAS"));
-    assert.equal(svg.includes("CODEX ATLAS"), false);
+    assert.ok(svg.includes("CLAUDE VIBE CHECK"));
+    assert.equal(svg.includes("CODEX VIBE CHECK"), false);
     assert.equal(svg.includes(settings.SYNC_TOKEN), false);
     // Fail closed if a backing-store mistake puts another provider under the requested key.
-    stored.set("claude-atlas:snapshot:v1", JSON.stringify(codex));
+    stored.set("claude-vibe-check:snapshot:v1", JSON.stringify(codex));
     assert.equal((await usage(read("?provider=claude"))).status, 503);
     assert.equal((await badge("?provider=claude")).status, 503);
   } finally {
@@ -200,14 +200,14 @@ test("cloud providers use independent storage, private reads and separate public
 test("local snapshots remain separated and missing Claude data never falls back to Codex", async () => {
   const { mkdtemp, readFile, stat, rm } = await import("node:fs/promises");
   const { saveSnapshot, readSnapshot } = await import("../lib/storage");
-  const folder = await mkdtemp(path.join(tmpdir(), "atlas-provider-storage-"));
+  const folder = await mkdtemp(path.join(tmpdir(), "vibe-check-provider-storage-"));
   const oldCwd = process.cwd(),
-    oldMode = process.env.ATLAS_MODE;
+    oldMode = process.env.VIBE_CHECK_MODE;
   try {
     const codex = await legacySnapshot();
     const claude: UsageSnapshot = { ...codex, provider: "claude" };
     process.chdir(folder);
-    process.env.ATLAS_MODE = "local";
+    process.env.VIBE_CHECK_MODE = "local";
     await saveSnapshot(codex);
     assert.equal((await readSnapshot())?.provider, undefined);
     assert.equal(await readSnapshot("claude"), null);
@@ -234,8 +234,8 @@ test("local snapshots remain separated and missing Claude data never falls back 
     );
   } finally {
     process.chdir(oldCwd);
-    if (oldMode === undefined) delete process.env.ATLAS_MODE;
-    else process.env.ATLAS_MODE = oldMode;
+    if (oldMode === undefined) delete process.env.VIBE_CHECK_MODE;
+    else process.env.VIBE_CHECK_MODE = oldMode;
     await rm(folder, { recursive: true, force: true });
   }
 });

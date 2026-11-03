@@ -12,7 +12,16 @@ The Codex view is useful for a personal Pro subscription. Claude Code works from
 
 You don't need to clone this repository. Everything below happens in your browser plus one terminal command.
 
-1. **Deploy.** [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fdarrellchee%2Fvibe-check&project-name=vibe-check&repository-name=vibe-check&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22upstash%22%2C%22productSlug%22%3A%22upstash-kv%22%2C%22protocol%22%3A%22storage%22%7D%5D) Vercel copies the repo to your GitHub and creates a free Upstash Redis database. There are no environment variables to fill in. Then open `https://your-site.vercel.app/setup`. (Starting from `/setup` on any copy does this for you and returns you to your new site automatically.)
+1. **Deploy.** [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fdarrellchee%2Fvibe-check&project-name=vibe-check&repository-name=vibe-check&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22upstash%22%2C%22productSlug%22%3A%22upstash-kv%22%2C%22protocol%22%3A%22storage%22%2C%22allowConnectExistingProduct%22%3Atrue%7D%5D) Vercel copies the repo to your GitHub and creates a free Upstash Redis database. There are no environment variables to fill in. Then open `https://your-site.vercel.app/setup`. (Starting from `/setup` on any copy does this for you, lets you pick the database, and returns you to your new site automatically.)
+
+   Already used Upstash’s free database? Each button below creates a different free database instead, or lets you connect one you already have. Pick one:
+
+   | Database | Free plan | |
+   | --- | --- | --- |
+   | Neon Postgres | Up to 100 free projects | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fdarrellchee%2Fvibe-check&project-name=vibe-check&repository-name=vibe-check&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22neon%22%2C%22productSlug%22%3A%22neon%22%2C%22protocol%22%3A%22storage%22%2C%22allowConnectExistingProduct%22%3Atrue%7D%5D) |
+   | Turso | Hundreds of free databases | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fdarrellchee%2Fvibe-check&project-name=vibe-check&repository-name=vibe-check&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22tursocloud%22%2C%22productSlug%22%3A%22database%22%2C%22protocol%22%3A%22storage%22%2C%22allowConnectExistingProduct%22%3Atrue%7D%5D) |
+   | Redis Cloud | 1 free 30 MB database | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fdarrellchee%2Fvibe-check&project-name=vibe-check&repository-name=vibe-check&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22redis%22%2C%22productSlug%22%3A%22redis%22%2C%22protocol%22%3A%22storage%22%2C%22allowConnectExistingProduct%22%3Atrue%7D%5D) |
+   | Supabase | 2 free projects, paused after a week idle | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fdarrellchee%2Fvibe-check&project-name=vibe-check&repository-name=vibe-check&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22supabase%22%2C%22productSlug%22%3A%22supabase%22%2C%22protocol%22%3A%22storage%22%2C%22allowConnectExistingProduct%22%3Atrue%7D%5D) |
 2. **Connect.** Press **Get my command**. This claims the site, shows your dashboard password once (save it: you need it to sign in after today or on another device), and gives you one command to paste into a terminal on the computer you use for AI coding:
 
    ```sh
@@ -36,7 +45,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-**The dashboard is only viewed on your deployed site.** On a local copy, the dashboard pages show "You can only view your project in the deployed version" with a button to your site, or open the setup wizard at `/setup` if this computer is not linked to a site yet. A computer is linked once the connect command has installed the collector (or this checkout's `.env.local` has an HTTPS `SYNC_URL`). **Unlink this computer** on that page stops the collector service and removes the site and upload token from its settings; usage already uploaded stays on the site. The README editor at `/edit` still works locally.
+**A local copy points you to your deployed site first.** On a local copy, the dashboard pages first show "You can only view your project in the deployed version" with a button to your site, or open the setup wizard at `/setup` if this computer is not linked to a site yet. **Visit dashboard** (on that page, or "Visit dashboard on this computer" in setup) opens the local dashboard and remembers the choice until the browser closes. A computer is linked once the connect command has installed the collector (or this checkout's `.env.local` has an HTTPS `SYNC_URL`). **Unlink this computer** on that page stops the collector service and removes the site and upload token from its settings; usage already uploaded stays on the site. The README editor at `/edit` still works locally.
 
 Open [localhost:3000](http://localhost:3000) for Codex, [localhost:3000/claude](http://localhost:3000/claude) for Claude Code, [localhost:3000/cursor](http://localhost:3000/cursor) for Cursor, or [localhost:3000/antigravity](http://localhost:3000/antigravity) for Antigravity; the sidebar switches providers. Local Codex mode reads `~/.codex/sessions` and `~/.codex/archived_sessions`, including nested folders and both plain `.jsonl` and Zstandard-compressed `.jsonl.zst` rollouts. Set `CODEX_HOME` to use another retained history directory. The app automatically collects local usage; dashboard refreshes display new data. `USAGE_TIMEZONE` defaults to `Australia/Sydney`.
 
@@ -89,19 +98,30 @@ Pricing and source URLs live in [`lib/pricing.ts`](lib/pricing.ts), with support
 The dashboard can run independently in the cloud. New local activity still needs a collector running on the machine that has that history:
 
 ```text
-Provider history / usage export → local collector → authenticated HTTPS upload → cloud Redis → dashboard
+Provider history / usage export → local collector → authenticated HTTPS upload → cloud database → dashboard
 ```
 
 The upload contains daily/model/hour aggregates and coverage metadata. It does not contain prompts, responses, project paths, session IDs, or account credentials. A single upload replaces the previous snapshot for its provider; **use one collector per provider only**. Each provider has isolated storage, so syncing Cursor or Claude never overwrites Codex. Multiple machines are not merged, and concurrent collectors can replace each other's coverage.
 
 ### Vercel
 
-Use the deploy button in **Get started** for the zero-configuration path. A site running on Vercel switches to cloud mode automatically, accepts both `UPSTASH_REDIS_REST_*` and Vercel's `KV_REST_API_*` variable names, and stores only hashes of its generated password and upload tokens.
+Use a deploy button in **Get started** for the zero-configuration path. A site running on Vercel switches to cloud mode automatically and stores only hashes of its generated password and upload tokens.
+
+**Databases.** The site uses whichever database's variables Vercel injected, checking in this order:
+
+| Database | Variables it reads |
+| --- | --- |
+| Upstash Redis | `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`, or Vercel's `KV_REST_API_URL` and `KV_REST_API_TOKEN` |
+| Redis Cloud, Aiven for Valkey, or any Redis 6.2+ | `REDIS_URL` (`redis://` or `rediss://`) |
+| Turso | `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` |
+| Neon, Supabase, or another Postgres | `DATABASE_URL`, or `POSTGRES_URL` |
+
+To switch an existing site, add a different database under **Storage** in your Vercel project, remove the old one, and redeploy. Data is not copied between databases, so claim the site and connect your computer again. Postgres keeps its data in its own `vibe_check` schema with row level security on, and Turso in tables named `vibe_check_*`, so a database shared with other apps is safe. Postgres certificates are verified, except Supabase's pooler, which is signed by Supabase's own certificate authority and is encrypted without verification. Redis Cloud's free plan does not offer TLS, so its traffic is not encrypted; prefer another database if that matters to you. Aiven for Valkey is not in the Vercel Marketplace: create a free service at aiven.io and set `REDIS_URL` to its `rediss://` address.
 
 **Advanced: operator-managed secrets.** Environment variables still take precedence over generated credentials, which suits teams, containers and scripted deploys:
 
 - `ATLAS_MODE=cloud` (optional on Vercel)
-- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`
+- One database's variables from the table above
 - `SYNC_TOKEN`, a unique random value of at least 32 characters
 - `DASHBOARD_PASSWORD`, a separate strong dashboard password
 - `PUBLIC_WIDGET`, `PUBLIC_CLAUDE_WIDGET`, `PUBLIC_CURSOR_WIDGET` and `PUBLIC_ANTIGRAVITY_WIDGET` set to `true` or `false`. Unset means a claimed site publishes that provider's card; `false` keeps it private.
@@ -120,7 +140,7 @@ npm run sync -- --provider all --watch
 
 Sync requires HTTPS, except loopback HTTP for development. Redirects are rejected. Keep secrets in environment files or a secret manager, never command arguments. Do not use `NEXT_PUBLIC_` variables for secrets. You can generate a secret locally with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`.
 
-The watch process must remain running, or be supervised by your operating system's service manager. When the collector is offline, the cloud keeps the last durable snapshot and shows its age. Cloud hosting cannot fetch personal provider account history on its own. Polling an exported file only updates the dashboard when that source file changes; it does not automatically refresh the provider account export. With `--provider all`, providers are attempted separately; a failure in one is reported and does not prevent an upload attempt for the other. A one-off sync exits unsuccessfully if any selected provider fails. Watch mode retries on the next cycle. This repository provides the deployment implementation; creating a real cloud deployment requires your hosting and Redis configuration.
+The watch process must remain running, or be supervised by your operating system's service manager. When the collector is offline, the cloud keeps the last durable snapshot and shows its age. Cloud hosting cannot fetch personal provider account history on its own. Polling an exported file only updates the dashboard when that source file changes; it does not automatically refresh the provider account export. With `--provider all`, providers are attempted separately; a failure in one is reported and does not prevent an upload attempt for the other. A one-off sync exits unsuccessfully if any selected provider fails. Watch mode retries on the next cycle. This repository provides the deployment implementation; creating a real cloud deployment requires your hosting and database configuration.
 
 ### Docker
 
@@ -219,4 +239,4 @@ npm run build
 npm start
 ```
 
-Tests cover token parsing and deduplication, aggregate calculations, pricing, and authentication boundaries. Build and local tests do not prove that your hosting credentials or remote deployment work. After deploying, verify login, a collector upload, a reload with matching totals, and the freshness timestamp. Rotate both secrets if exposed. Delete Redis key `codex-atlas:snapshot:v1` for Codex, `claude-atlas:snapshot:v1` for Claude, or `cursor-atlas:snapshot:v1` for Cursor to remove the respective cloud snapshot; remove local `data/snapshot.json`, `data/claude-snapshot.json`, or `data/cursor-snapshot.json` separately. Existing v1 snapshots without a provider field remain Codex. Usage, ingestion, and widget endpoints default to Codex; `?provider=claude` selects Claude and `?provider=cursor` selects Cursor, and ingestion rejects a provider mismatch. Your Redis provider's backups and retention settings apply independently.
+Tests cover token parsing and deduplication, aggregate calculations, pricing, and authentication boundaries. Build and local tests do not prove that your hosting credentials or remote deployment work. After deploying, verify login, a collector upload, a reload with matching totals, and the freshness timestamp. Rotate both secrets if exposed. Delete key `codex-vibe-check:snapshot:v1` for Codex, `claude-vibe-check:snapshot:v1` for Claude, or `cursor-vibe-check:snapshot:v1` for Cursor to remove the respective cloud snapshot (in Redis it is a key; in Postgres a row of `vibe_check.kv`; in Turso a row of `vibe_check_kv`). Sites deployed before the rename may also hold the same keys with `atlas` in place of `vibe-check` (for example `codex-atlas:snapshot:v1` and `atlas:instance:v1`); the app still reads those and copies them to the new names, so delete both; remove local `data/snapshot.json`, `data/claude-snapshot.json`, or `data/cursor-snapshot.json` separately. Existing v1 snapshots without a provider field remain Codex. Usage, ingestion, and widget endpoints default to Codex; `?provider=claude` selects Claude and `?provider=cursor` selects Cursor, and ingestion rejects a provider mismatch. Your database provider's backups and retention settings apply independently.

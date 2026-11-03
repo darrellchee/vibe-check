@@ -6,7 +6,7 @@ import path from "node:path";
 import { collectUsage } from "../lib/collector";
 
 async function collectRows(rows: unknown[]) {
-  const home = await mkdtemp(path.join(tmpdir(), "atlas-audit-"));
+  const home = await mkdtemp(path.join(tmpdir(), "vibe-check-audit-"));
   try {
     await mkdir(path.join(home, "sessions"));
     await writeFile(

@@ -69,4 +69,7 @@ export interface UsageSnapshot {
     tokens: number;
   } | null;
   pricing: { checkedAt: string; sources: string[] };
+  // Only on combined ("All") snapshots: each harness's recorded tokens, for the harness card.
+  harnesses?: HarnessShare[];
 }
+export interface HarnessShare { provider: UsageProvider; totalTokens: number }

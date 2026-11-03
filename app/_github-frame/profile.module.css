@@ -28,19 +28,13 @@
   cursor: default;
 }
 
-/* Opt-in for pages that reuse this look but need working controls (the README editor). The header
-   and tab strip stay look-only. */
+/* Opt-in for pages that reuse this look but need working controls (the README editor). */
 .interactive {
   min-height: 0;
   pointer-events: auto;
   user-select: auto;
   -webkit-user-select: auto;
   cursor: auto;
-}
-.interactive .chrome {
-  pointer-events: none;
-  user-select: none;
-  -webkit-user-select: none;
 }
 
 .root img {
@@ -53,203 +47,10 @@
   padding: 0;
 }
 
-/* ───────── Signed-in header + profile tab strip (one dark bar) ───────── */
-.chrome {
-  background: #010409;
-  border-bottom: 1px solid var(--border);
-}
-.header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  height: 51px;
-  padding: 15px 16px 0;
-}
-.hdrLeft,
-.hdrRight {
-  display: flex;
-  align-items: center;
-  height: 32px;
-}
-.hdrRight {
-  gap: 8px;
-}
-.iconBtn {
-  position: relative;
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--muted);
-}
-.logo {
-  flex: none;
-  margin-left: 12.25px;
-  color: var(--fg);
-}
-.ctx {
-  margin-left: 13.7px;
-  color: var(--fg);
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 21px;
-}
-.search {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 9.5px;
-  width: 198px;
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 21px;
-  white-space: nowrap;
-}
-.search svg {
-  flex: none;
-}
-.kbd {
-  display: inline-block;
-  width: 16px;
-  height: 15px;
-  margin: 0 0.5px;
-  border: 1px solid var(--muted);
-  border-radius: 4px;
-  font-family: var(--mono);
-  font-size: 11px;
-  line-height: 13px;
-  text-align: center;
-  vertical-align: 0.5px;
-}
-.split {
-  display: flex;
-  flex: none;
-  margin-left: -1.5px;
-  width: 57px;
-  height: 32px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--muted);
-}
-.splitMain {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 31px;
-  border-right: 1px solid var(--border);
-}
-.splitCaret {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  justify-content: center;
-}
-.sep {
-  flex: none;
-  width: 1px;
-  height: 20px;
-  margin: 0 4px 0 3.2px;
-  background: var(--border);
-}
-.plusBtn {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 4px;
-  width: 50px;
-  height: 32px;
-  padding: 0 5px 0 7px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--muted);
-}
-.unread {
-  position: absolute;
-  top: -3.4px;
-  right: -2px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #4493f8;
-}
-.viewer {
-  display: block;
-  flex: none;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
-}
 .container {
   max-width: 1280px;
   margin: 0 auto;
   padding: 0 32px;
-}
-.tabs {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  height: 47px;
-  overflow: hidden;
-}
-.tab {
-  position: relative;
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-  height: 30px;
-  padding: 0 8px;
-  border-radius: 6px;
-  color: var(--fg);
-  font-size: 14px;
-  line-height: 30px;
-  white-space: nowrap;
-}
-.tab:first-child {
-  padding-left: 24px;
-}
-.tab svg {
-  color: var(--muted);
-}
-.tab:nth-child(2) svg,
-.tab:nth-child(3) svg {
-  margin-right: 2.3px;
-}
-.tabSelected {
-  font-weight: 600;
-}
-.tabSelected::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  bottom: -8.5px;
-  left: 0;
-  height: 2px;
-  border-radius: 6px;
-  background: #f78166;
-}
-.counter {
-  margin-left: 3.5px;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border: 1px solid transparent;
-  border-radius: 24px;
-  background: rgba(101, 108, 118, 0.2);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 18px;
-  text-align: center;
 }
 
 /* ───────── Two-column layout ───────── */
@@ -1178,11 +979,6 @@
   .sidebar {
     flex-basis: auto;
     width: auto;
-  }
-  .search,
-  .split,
-  .sep {
-    display: none;
   }
   .yearly {
     flex-direction: column;

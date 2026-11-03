@@ -9,7 +9,7 @@ export function sessionToken(
   password: string,
   day = Math.floor(Date.now() / 86_400_000),
 ) {
-  return `${day}.${createHmac("sha256", password).update(`codex-atlas-session:${day}`).digest("hex")}`;
+  return `${day}.${createHmac("sha256", password).update(`vibe-check-session:${day}`).digest("hex")}`;
 }
 export function validSession(value: string, password: string) {
   return [0, 1].some((offset) =>
@@ -26,13 +26,14 @@ export const sessionCookieOptions = () => ({
   path: "/",
   maxAge: 86_400,
 });
+const SESSION_COOKIE_PREFIX = "vibe_check_session=";
 const sessionCookie = (request: Request) =>
   request.headers
     .get("cookie")
     ?.split(";")
     .map((x) => x.trim())
-    .find((x) => x.startsWith("atlas_session="))
-    ?.slice(14) || "";
+    .find((x) => x.startsWith(SESSION_COOKIE_PREFIX))
+    ?.slice(SESSION_COOKIE_PREFIX.length) || "";
 export function authorized(request: Request) {
   const password = process.env.DASHBOARD_PASSWORD;
   if (!password) return process.env.NODE_ENV !== "production";

@@ -31,7 +31,7 @@ test('Cursor selection and optional metric availability are strictly validated',
 
 test('Cursor upload, reads and public widget cannot overwrite or expose another provider', async () => {
   const env: Record<string, string | undefined> = process.env;
-  const settings = { ATLAS_MODE: 'cloud', SYNC_TOKEN: 'synthetic-cursor-private-token-123456789', DASHBOARD_PASSWORD: 'synthetic-cursor-password', UPSTASH_REDIS_REST_URL: 'https://cursor-fixture-storage.example', UPSTASH_REDIS_REST_TOKEN: 'synthetic-fixture-storage', NODE_ENV: 'production', PUBLIC_WIDGET: 'true', PUBLIC_CLAUDE_WIDGET: 'true', PUBLIC_CURSOR_WIDGET: undefined };
+  const settings = { VIBE_CHECK_MODE: 'cloud', SYNC_TOKEN: 'synthetic-cursor-private-token-123456789', DASHBOARD_PASSWORD: 'synthetic-cursor-password', UPSTASH_REDIS_REST_URL: 'https://cursor-fixture-storage.example', UPSTASH_REDIS_REST_TOKEN: 'synthetic-fixture-storage', NODE_ENV: 'production', PUBLIC_WIDGET: 'true', PUBLIC_CLAUDE_WIDGET: 'true', PUBLIC_CURSOR_WIDGET: undefined };
   const before = Object.fromEntries(Object.keys(settings).map(key => [key, env[key]]));
   const realFetch = globalThis.fetch;
   const stored = new Map<string, string>();
@@ -51,11 +51,11 @@ test('Cursor upload, reads and public widget cannot overwrite or expose another 
     const claude = { ...codex, provider: 'claude' as const };
     const upload = (snapshot: unknown, provider: string) => new Request(`https://dashboard.example/api/ingest?provider=${provider}`, { method: 'POST', headers: { Authorization: `Bearer ${settings.SYNC_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(snapshot) });
     for (const [provider, snapshot] of [['codex', codex], ['claude', claude], ['cursor', cursor]] as const) assert.equal((await ingest(upload(snapshot, provider))).status, 200);
-    assert.deepEqual([...stored.keys()].sort(), ['claude-atlas:snapshot:v1', 'codex-atlas:snapshot:v1', 'cursor-atlas:snapshot:v1']);
+    assert.deepEqual([...stored.keys()].sort(), ['claude-vibe-check:snapshot:v1', 'codex-vibe-check:snapshot:v1', 'cursor-vibe-check:snapshot:v1']);
     assert.equal((await ingest(upload(cursor, 'claude'))).status, 400);
     assert.equal((await ingest(upload(claude, 'cursor'))).status, 400);
     assert.equal((await ingest(upload(cursor, 'cursor'))).status, 409);
-    const read = (provider: string, authenticated = true) => new Request(`https://dashboard.example/api/usage?provider=${provider}`, { headers: authenticated ? { cookie: `atlas_session=${sessionToken(settings.DASHBOARD_PASSWORD)}` } : {} });
+    const read = (provider: string, authenticated = true) => new Request(`https://dashboard.example/api/usage?provider=${provider}`, { headers: authenticated ? { cookie: `vibe_check_session=${sessionToken(settings.DASHBOARD_PASSWORD)}` } : {} });
     assert.equal((await usage(read('cursor', false))).status, 401);
     const response = await usage(read('cursor'));
     assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'private, no-store');
@@ -64,7 +64,7 @@ test('Cursor upload, reads and public widget cannot overwrite or expose another 
     assert.equal((await widget(badgeRequest)).status, 404);
     env.PUBLIC_CURSOR_WIDGET = 'true';
     const badge = await widget(badgeRequest); assert.equal(badge.status, 200);
-    const svg = await badge.text(); assert.ok(svg.includes('CURSOR ATLAS'));
+    const svg = await badge.text(); assert.ok(svg.includes('CURSOR VIBE CHECK'));
     assert.match(svg, /unavailable|not available|unknown/i);
     for (const privateValue of [settings.SYNC_TOKEN, settings.DASHBOARD_PASSWORD, settings.UPSTASH_REDIS_REST_TOKEN, 'projectPath']) assert.equal(svg.includes(privateValue), false);
     const known = structuredClone(cursor);
@@ -81,7 +81,7 @@ test('Cursor upload, reads and public widget cannot overwrite or expose another 
     const partialSvg = await partialWidget.text();
     assert.match(partialSvg, />18</);
     assert.match(partialSvg, /Unavailable/i);
-    stored.set('cursor-atlas:snapshot:v1', JSON.stringify(codex));
+    stored.set('cursor-vibe-check:snapshot:v1', JSON.stringify(codex));
     assert.equal((await usage(read('cursor'))).status, 503);
     assert.equal((await widget(badgeRequest)).status, 503);
   } finally {

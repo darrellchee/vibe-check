@@ -42,10 +42,10 @@ test("a local copy counts as linked only once SYNC_URL names a public HTTPS site
 
 test("the setup status reports the linked site from SYNC_URL on a local copy", async () => {
   const env: Record<string, string | undefined> = process.env;
-  const before = { ATLAS_MODE: env.ATLAS_MODE, SYNC_URL: env.SYNC_URL, HOME: env.HOME };
+  const before = { VIBE_CHECK_MODE: env.VIBE_CHECK_MODE, SYNC_URL: env.SYNC_URL, HOME: env.HOME };
   try {
-    env.HOME = await mkdtemp(path.join(tmpdir(), "atlas-empty-home-")); // No installed collector here.
-    env.ATLAS_MODE = "local";
+    env.HOME = await mkdtemp(path.join(tmpdir(), "vibe-check-empty-home-")); // No installed collector here.
+    env.VIBE_CHECK_MODE = "local";
     delete env.SYNC_URL;
     assert.deepEqual(await setupState(), { cloud: false, site: null });
     env.SYNC_URL = "https://me.vercel.app";
@@ -53,4 +53,23 @@ test("the setup status reports the linked site from SYNC_URL on a local copy", a
   } finally {
     for (const [k, v] of Object.entries(before)) if (v === undefined) delete env[k]; else env[k] = v;
   }
+});
+
+test("a local copy shows the deployed-site page (or setup) first, then the dashboard once chosen", async () => {
+  const { gateView } = await import("../lib/setup-flow");
+  assert.equal(gateView({ cloud: true, linked: false, chosen: false }), "dashboard");
+  assert.equal(gateView({ cloud: false, linked: true, chosen: false }), "deployed-only");
+  assert.equal(gateView({ cloud: false, linked: false, chosen: false }), "setup");
+  assert.equal(gateView({ cloud: false, linked: true, chosen: true }), "dashboard");
+  assert.equal(gateView({ cloud: false, linked: false, chosen: true }), "dashboard");
+});
+
+test("tabs only hand over a deployed site that is a vercel.app setup page", async () => {
+  const { readDeployMessage } = await import("../lib/setup-flow");
+  assert.deepEqual(readDeployMessage({ type: "deployed", target: "https://me.vercel.app/setup" }),
+    { type: "deployed", target: "https://me.vercel.app/setup" });
+  assert.deepEqual(readDeployMessage({ type: "taken" }), { type: "taken" });
+  for (const bad of [null, "deployed", 42, {}, { type: "deployed" }, { type: "deployed", target: "https://evil.com/setup" },
+    { type: "deployed", target: "javascript:alert(1)" }, { type: "other", target: "https://me.vercel.app" }])
+    assert.equal(readDeployMessage(bad), null, JSON.stringify(bad));
 });

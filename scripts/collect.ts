@@ -14,7 +14,7 @@ async function main() {
     }
   }
   // Collection always writes locally, even when this checkout also has cloud settings.
-  process.env.ATLAS_MODE = "local";
+  process.env.VIBE_CHECK_MODE = "local";
   const { providers } = collectionOptions(process.argv.slice(2));
   for (const provider of providers) {
     try {

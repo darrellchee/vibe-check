@@ -1,5 +1,5 @@
-import Dashboard from "@/components/dashboard";
+import { DashboardWithUsage } from "@/components/usage-loaders";
 import LocalGate from "@/components/local-gate";
 export default function Page() {
-  return <LocalGate><Dashboard key="codex" provider="codex" /></LocalGate>;
+  return <LocalGate><DashboardWithUsage provider="codex" /></LocalGate>;
 }

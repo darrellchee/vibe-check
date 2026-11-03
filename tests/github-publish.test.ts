@@ -150,7 +150,7 @@ async function withEnv(values: Record<string, string | undefined>, run: () => Pr
     }
   }
 }
-const local = { ATLAS_MODE: "local", NODE_ENV: "development", DASHBOARD_PASSWORD: undefined, VERCEL: undefined };
+const local = { VIBE_CHECK_MODE: "local", NODE_ENV: "development", DASHBOARD_PASSWORD: undefined, VERCEL: undefined };
 const post = (body: unknown, headers: HeadersInit = {}) => new Request("http://localhost:3000/api/publish", {
   method: "POST", headers: { "content-type": "application/json", host: "localhost:3000", ...headers }, body: typeof body === "string" ? body : JSON.stringify(body),
 });
@@ -161,7 +161,7 @@ test("publish route refuses visitors who are not signed in", async () => {
     assert.equal((await status(new Request("http://localhost:3000/api/publish"))).status, 401);
     assert.equal((await publish(post({ markdown: "x" }))).status, 401);
     assert.equal(fake.calls.length, 0);
-    const cookie = { cookie: `atlas_session=${sessionToken("private-password")}` };
+    const cookie = { cookie: `vibe_check_session=${sessionToken("private-password")}` };
     assert.equal((await publish(post({ markdown: "x\n" }, cookie))).status, 200);
   });
 });
@@ -176,9 +176,9 @@ test("publish route refuses cross-site requests and never reaches GitHub", async
 });
 
 test("a deployed copy reports one-click publishing as unavailable and refuses to publish", async () => {
-  await withEnv({ ...local, ATLAS_MODE: "cloud", DASHBOARD_PASSWORD: "private-password", NODE_ENV: "production" }, async () => {
+  await withEnv({ ...local, VIBE_CHECK_MODE: "cloud", DASHBOARD_PASSWORD: "private-password", NODE_ENV: "production" }, async () => {
     const fake = fakeGh(); gh.run = fake.run;
-    const cookie = { cookie: `atlas_session=${sessionToken("private-password")}` };
+    const cookie = { cookie: `vibe_check_session=${sessionToken("private-password")}` };
     const info = await status(new Request("https://dash.example/api/publish", { headers: cookie }));
     assert.deepEqual(await info.json(), { available: false, reason: "cloud" });
     assert.equal((await publish(post({ markdown: "x" }, cookie))).status, 503);

@@ -1,0 +1,502 @@
+/* README preview (/preview). The page around the profile is the dashboard (.shell tokens and controls);
+   the profile itself is the GitHub frame (profile.module.css supplies --bg/--fg/--muted/--border/--link on
+   its .root), switched between GitHub's dark and light colours and between desktop and phone widths. */
+
+/* ───────── Toolbar ───────── */
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px 24px;
+  padding-block: 20px;
+}
+.barLead,
+.barTools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+.barTools {
+  gap: 8px;
+}
+.barText {
+  margin: 4px 0 0;
+  font-size: 15px;
+  letter-spacing: -0.03em;
+}
+.barText strong {
+  font-weight: 600;
+}
+.notices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 calc(var(--gutter) * -1);
+  padding: 10px var(--gutter);
+  border-top: 1px solid #f0e3a0;
+  background: #fff8d6;
+  font-size: 13px;
+  line-height: 1.4;
+  letter-spacing: -0.02em;
+  list-style: none;
+}
+.notices li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.notices :global(.tag) {
+  flex: none;
+  text-transform: uppercase;
+}
+
+/* ───────── GitHub frame ───────── */
+.stage {
+  margin-inline: calc(var(--gutter) * -1);
+  padding: 28px var(--gutter) 64px;
+  border-top: var(--hairline);
+  background: var(--surface-2);
+}
+.frame {
+  --code-bg: #151b23;
+  --bar-bg: #010409;
+  max-width: 1280px;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  letter-spacing: normal;
+  container-type: inline-size;
+  transition: max-width 0.45s var(--ease-reveal);
+}
+.frame.light {
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #59636e;
+  --border: #d1d9e0;
+  --border-muted: rgba(209, 217, 224, 0.7);
+  --link: #0969da;
+  --btn-bg: #f6f8fa;
+  --code-bg: #f6f8fa;
+  --bar-bg: #f6f8fa;
+}
+.frame.mobile {
+  max-width: 390px;
+}
+.ghBar,
+.tabs {
+  border-bottom: 1px solid var(--border);
+  background: var(--bar-bg);
+}
+.ghBar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  font-weight: 600;
+}
+/* A neutral stand-in where GitHub's own mark would be. */
+.mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--fg);
+}
+.tabs {
+  display: flex;
+  gap: 22px;
+  overflow-x: auto;
+  padding: 0 20px;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+.tab {
+  padding: 10px 2px;
+  color: var(--muted);
+}
+.tabOn {
+  box-shadow: inset 0 -2px #fd8c73;
+  color: var(--fg);
+  font-weight: 600;
+}
+.layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  padding: 24px 32px 32px;
+}
+.sidebar {
+  display: flex;
+  flex: 0 0 296px;
+  flex-direction: column;
+  gap: 16px;
+  width: 296px;
+}
+.avatar {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--btn-bg);
+  object-fit: cover;
+}
+.names {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.follow {
+  max-width: 296px;
+}
+.content {
+  flex: 1;
+  min-width: 0;
+}
+.note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.failed {
+  padding: 28px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  text-align: center;
+}
+.failed a {
+  color: var(--link);
+}
+/* GitHub stacks the profile on narrow screens; this follows the frame's width, so the Mobile toggle
+   shows the phone layout on any screen. */
+@container (max-width: 767px) {
+  .layout {
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+  }
+  .sidebar {
+    flex: none;
+    flex-direction: row;
+    align-items: center;
+    width: auto;
+  }
+  .avatar {
+    flex: none;
+    width: 72px;
+  }
+}
+
+/* ───────── Rendered README ───────── */
+.rendered {
+  font-size: 16px;
+  line-height: 1.5;
+  overflow-wrap: break-word;
+}
+.rendered > :first-child {
+  margin-top: 0;
+}
+.rendered > :last-child {
+  margin-bottom: 0;
+}
+.rendered h1,
+.rendered h2,
+.rendered h3,
+.rendered h4,
+.rendered h5,
+.rendered h6 {
+  margin: 24px 0 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.rendered h1,
+.rendered h2 {
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border-muted);
+}
+.rendered h1 { font-size: 2em; }
+.rendered h2 { font-size: 1.5em; }
+.rendered h3 { font-size: 1.25em; }
+.rendered h4 { font-size: 1em; }
+.rendered h5 { font-size: 0.875em; }
+.rendered h6 { font-size: 0.85em; color: var(--muted); }
+.rendered p,
+.rendered ul,
+.rendered ol,
+.rendered blockquote,
+.rendered pre {
+  margin: 0 0 16px;
+}
+.rendered ul,
+.rendered ol {
+  padding-left: 2em;
+}
+.rendered li + li {
+  margin-top: 0.25em;
+}
+.rendered a {
+  color: var(--link);
+  text-decoration: none;
+}
+.rendered a:hover {
+  text-decoration: underline;
+}
+.rendered code {
+  padding: 0.2em 0.4em;
+  border-radius: 6px;
+  background: rgba(101, 108, 118, 0.2);
+  font: 85% var(--mono);
+}
+.rendered pre {
+  overflow: auto;
+  padding: 16px;
+  border-radius: 6px;
+  background: var(--code-bg);
+  font-size: 85%;
+  line-height: 1.45;
+}
+.rendered pre code {
+  padding: 0;
+  background: none;
+  font-size: 100%;
+}
+.rendered blockquote {
+  padding: 0 1em;
+  border-left: 0.25em solid var(--border);
+  color: var(--muted);
+}
+.rendered hr {
+  height: 0.25em;
+  margin: 24px 0;
+  padding: 0;
+  border: 0;
+  background: var(--border);
+}
+.rendered img {
+  max-width: 100%;
+}
+/* Cards side by side, each at its README width (GitHub shrinks them on narrow screens). */
+.figureRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+.sizer {
+  max-width: 100%;
+}
+
+/* ───────── Publish panel ───────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+}
+.scrim {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  background: rgba(18, 18, 18, 0.35);
+  cursor: default;
+  animation: fade 0.3s var(--ease-ui);
+}
+.drawer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  box-sizing: border-box;
+  width: min(460px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  padding: 22px 24px 32px;
+  border-left: 1px solid var(--ink);
+  background: var(--surface);
+  animation: slide 0.45s var(--ease-reveal);
+}
+@keyframes fade {
+  from { opacity: 0; }
+}
+@keyframes slide {
+  from { translate: 100% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scrim,
+  .drawer {
+    animation: none;
+  }
+  .frame {
+    transition: none;
+  }
+}
+.drawerHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.drawerTitle {
+  margin-top: 10px;
+}
+.accent {
+  color: var(--accent);
+}
+.checks {
+  margin: 0;
+  padding: 0;
+  border-top: var(--hairline);
+  list-style: none;
+}
+.check {
+  display: flex;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: var(--rule);
+}
+.dot {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border: 1px solid var(--grey);
+  border-radius: 50%;
+}
+.dotOk {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #ffffff;
+}
+.dotWarn {
+  border-color: var(--tag);
+  background: var(--tag);
+  color: var(--black);
+  font-size: 13px;
+  font-weight: 700;
+}
+.checkBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.label {
+  display: block;
+  color: var(--grey-dark);
+  font-size: 12px;
+  letter-spacing: 0.015em;
+  text-transform: uppercase;
+}
+.field {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--ink);
+  border-radius: 9999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 15px;
+  letter-spacing: -0.02em;
+}
+.field[aria-invalid="true"] {
+  border-color: #b42318;
+}
+.field:read-only {
+  border-color: #dedfe1;
+  background: var(--surface-2);
+}
+.fit {
+  align-self: flex-start;
+}
+.help {
+  margin: 0;
+  color: var(--grey);
+  font-size: 13px;
+  line-height: 1.4;
+  letter-spacing: -0.02em;
+}
+.help a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.help code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0;
+}
+.error {
+  color: #b42318;
+}
+.success {
+  color: var(--ink);
+}
+.warnList {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.4;
+  letter-spacing: -0.02em;
+}
+.warnList li + li {
+  margin-top: 6px;
+}
+.action {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.wide {
+  width: 100%;
+  min-height: 48px;
+}
+.manual {
+  padding-top: 16px;
+  border-top: var(--rule);
+}
+.manual summary {
+  cursor: pointer;
+  font-size: 13px;
+  letter-spacing: 0.015em;
+  text-decoration: underline;
+  text-transform: uppercase;
+  text-underline-offset: 4px;
+}
+.manual > * + * {
+  margin-top: 10px;
+}
+.manual[open] > summary + * {
+  margin-top: 16px;
+}
+.output {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #dedfe1;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0;
+  resize: vertical;
+}
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.drawer :is(summary, textarea):focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}

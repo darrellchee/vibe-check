@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Incorrect password" }, { status: 401 });
   const response = NextResponse.json({ ok: true });
   response.cookies.set(
-    "atlas_session",
+    "vibe_check_session",
     sessionToken(envPassword || instance!.sessionSecret),
     sessionCookieOptions(),
   );
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
 }
 export async function DELETE() {
   const response = NextResponse.json({ ok: true });
-  response.cookies.set("atlas_session", "", {
+  response.cookies.set("vibe_check_session", "", {
     httpOnly: true,
     path: "/",
     maxAge: 0,

@@ -1,7 +1,7 @@
 import path from "node:path";
 
-export const serviceLabel = "dev.codex-atlas.collector";
-export const serviceMarker = "Managed by Codex Atlas collector installer";
+export const serviceLabel = "dev.vibe-check.collector";
+export const serviceMarker = "Managed by Vibe Check collector installer";
 type ServiceConfig = {
   platform: "darwin" | "linux";
   root: string;
@@ -33,7 +33,7 @@ export function collectorService(config: ServiceConfig) {
   if (!["codex", "claude", "cursor", "antigravity", "all"].includes(provider)) throw new Error("Unknown collector provider.");
   const args = [node, "--import", loader, path.join(root, "scripts/sync.ts"), "--provider", provider, "--watch"];
   if (platform === "darwin") {
-    const logDir = path.join(home, "Library/Logs/CodexAtlas");
+    const logDir = path.join(home, "Library/Logs/VibeCheck");
     return {
       file: serviceFile("darwin", home),
       logDir,
@@ -57,7 +57,7 @@ export function collectorService(config: ServiceConfig) {
     logDir: null,
     content: `# ${serviceMarker}
 [Unit]
-Description=Codex Atlas usage collector
+Description=Vibe Check usage collector
 After=network-online.target
 
 [Service]

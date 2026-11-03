@@ -1,648 +1,229 @@
-/* README editor. Layered on the GitHub profile scope (profile.module.css), which supplies the
-   --bg/--fg/--muted/--border/--link variables on its .root element. */
+/* README editor (/edit). Sits inside the dashboard's .shell, so it uses the same tokens (--ink, --grey,
+   --rule, --hairline, --accent, --gutter) and the shared controls (.pill, .round, .segmented, .select-pill).
+   Three columns on wide screens: Elements, the page, and the Inspector for the selected block. */
 
-.page {
-  min-height: 100vh;
-  background: #0d1117;
-  /* `clip` (unlike `hidden`) never creates a scroll container, so the sticky board keeps working. */
-  overflow-x: clip;
-  color-scheme: dark;
+/* Panel widths are set inline (--left, --right) and remembered in this browser. Below 62rem the panels
+   stack and none of the resize or collapse controls apply. */
+.workspace {
+  --left: 280px;
+  --right: 320px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "elements" "canvas" "inspector";
+  margin-inline: calc(var(--gutter) * -1);
+  border-top: var(--hairline);
 }
-.appbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 16px;
-  border-bottom: 1px solid #30342a;
-  background: #141612;
-}
-.appbar > :global(.provider-switch) {
+.elements,
+.inspector {
+  position: relative;
   min-width: 0;
+  background: var(--surface);
 }
-.brand {
-  display: inline-flex;
-  flex: none;
+.panelBody {
+  box-sizing: border-box;
+  padding: 20px var(--gutter) 32px;
+}
+.elements {
+  grid-area: elements;
+  border-bottom: var(--rule);
+}
+.elements .panelBody {
+  max-height: 440px;
+  overflow: auto;
+}
+.inspector {
+  grid-area: inspector;
+  border-top: var(--rule);
+}
+.canvas {
+  grid-area: canvas;
+  min-width: 0;
+  min-height: 70vh;
+  padding: 20px clamp(12px, 2vw, 28px) 48px;
+  background: var(--surface-2);
+}
+
+/* Collapse buttons, the collapsed rails and the drag handles only exist where the panels sit beside the page. */
+.collapseBtn,
+.rail,
+.handleBar {
+  display: none;
+}
+.panelTools {
+  display: flex;
   align-items: center;
   gap: 8px;
-  color: #b7ea76;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
 }
-
-/* ───────── Cards (README + Publish) ───────── */
-.card {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-}
-.card + .card {
-  margin-top: 24px;
-}
-.cardHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 49px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
-  border-radius: 6px 6px 0 0;
-  background: #151b23;
-}
-.title {
-  font-family: var(--mono);
+.railLabel {
+  color: var(--grey-dark);
   font-size: 12px;
-  line-height: 18px;
+  letter-spacing: 0.015em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
 }
-.cardTitle {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
-.body {
-  padding: 24px;
-}
-.muted {
-  color: var(--muted);
-}
-.segment {
-  display: inline-flex;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-.segment button {
-  padding: 4px 14px;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 20px;
-}
-.segment button:hover {
-  color: var(--fg);
-}
-.segment .segmentOn {
-  background: var(--btn-bg);
-  color: var(--fg);
-  font-weight: 600;
-}
-
-/* ───────── Edit surface ───────── */
-.empty {
-  display: flex;
+.rail {
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 56px 24px;
-  border: 2px dashed var(--border);
-  border-radius: 6px;
-  background: rgba(1, 4, 9, 0.5);
-  color: var(--muted);
-  line-height: 1.5;
-  text-align: center;
-  transition: border-color 0.12s, background-color 0.12s;
+  gap: 16px;
+  padding: 16px 0;
 }
-.empty strong {
-  color: var(--fg);
-  font-size: 16px;
-  font-weight: 600;
-}
-.empty span {
-  max-width: 34em;
-}
-.emptyArmed {
-  border-color: #1f6feb;
-  background: rgba(31, 111, 235, 0.1);
-}
-/* A row holds one text block, or one or more cards side by side. Padding (not margin) makes the gaps
-   between rows part of a drop target. */
-.blockRow {
-  position: relative;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 12px 16px;
-  padding: 12px 0;
-}
-.blockRow + .blockRow {
-  border-top: 1px solid var(--border-muted);
-}
-.blockRow:first-child {
-  padding-top: 0;
-}
-.block {
-  position: relative;
-  min-width: 0;
-  max-width: 100%;
-}
-.text,
-.block.wide {
-  flex: 1 1 100%;
-}
-/* Narrower than this the toolbar buttons no longer fit, so a small card sits in a wider frame. */
-.cardBlock {
-  min-width: 232px;
-}
-
-.dragging {
-  opacity: 0.4;
-}
-.insert {
+.handleBar {
   position: absolute;
-  top: -1px;
-  right: 0;
-  left: 0;
-  z-index: 1;
-  height: 3px;
-  border-radius: 2px;
-  background: #1f6feb;
-  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.25);
-  pointer-events: none;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 12px;
+  touch-action: none;
+  cursor: col-resize;
 }
-.blockBar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  margin-bottom: 8px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 18px;
+.handleBar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  translate: -50% 0;
+  background: transparent;
+  transition: background-color 0.2s var(--ease-ui);
 }
-.handle {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 28px;
-  border-radius: 6px;
-  cursor: grab;
+.handleBar:hover::after,
+.handleBar:focus-visible::after,
+.handleBar[data-active]::after {
+  background: var(--ink);
 }
-.handle:hover {
-  color: var(--fg);
-  background: var(--btn-bg);
+.handleBar:focus-visible {
+  outline: none;
 }
-.handle:active {
-  cursor: grabbing;
+.handleLeft {
+  right: -6px;
 }
-.blockLabel {
-  flex: 1;
-  font-weight: 500;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.handleRight {
+  left: -6px;
 }
-.iconBtn {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--btn-bg);
-  color: var(--muted);
+@media (min-width: 62rem) {
+  .workspace {
+    grid-template-columns: var(--left) minmax(0, 1fr);
+    grid-template-areas: "elements canvas" "elements inspector";
+  }
+  .elements {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    border-bottom: 0;
+    border-right: var(--rule);
+  }
+  .elements .panelBody {
+    max-height: 100vh;
+  }
+  .elements .collapseBtn,
+  .elements .handleBar {
+    display: inline-grid;
+  }
+  .elements .handleBar {
+    display: block;
+  }
+  /* Collapsed: only a slim rail with the expand button is left. */
+  .elements[data-collapsed] .panelBody,
+  .elements[data-collapsed] .handleBar {
+    display: none;
+  }
+  .elements[data-collapsed] .rail {
+    display: flex;
+  }
 }
-.iconBtn:hover:not(:disabled) {
-  border-color: #9198a1;
-  color: var(--fg);
+@media (min-width: 75rem) {
+  .workspace {
+    grid-template-columns: var(--left) minmax(0, 1fr) var(--right);
+    grid-template-areas: "elements canvas inspector";
+  }
+  .inspector {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    border-top: 0;
+    border-left: var(--rule);
+  }
+  .inspector .panelBody {
+    max-height: 100vh;
+    overflow: auto;
+  }
+  .inspector .collapseBtn {
+    display: inline-grid;
+    margin-bottom: 12px;
+  }
+  .inspector .handleBar {
+    display: block;
+  }
+  .inspector[data-collapsed] .panelBody,
+  .inspector[data-collapsed] .handleBar {
+    display: none;
+  }
+  .inspector[data-collapsed] .rail {
+    display: flex;
+  }
 }
-.iconBtn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+@media (min-width: 62rem) and (prefers-reduced-motion: no-preference) {
+  .workspace:not([data-resizing]) {
+    transition: grid-template-columns 0.3s var(--ease-ui);
+  }
 }
-.text {
-  display: block;
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: #010409;
-  color: var(--fg);
-  font: 13px/20px var(--mono);
-  resize: vertical;
-}
-.widget {
-  display: block;
-  max-width: 100%;
-  height: auto;
-}
-.placeholder {
-  padding: 28px 16px;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  color: var(--muted);
-  text-align: center;
-}
-.placeholder a {
-  color: var(--link);
-  text-decoration: underline;
-  text-underline-offset: 0.2rem;
-}
-.controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 20px;
-  margin-top: 12px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.controls label,
-.metrics {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.metrics {
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  color: var(--muted);
-}
-.controls select,
-.row input {
-  height: 32px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: #010409;
-  color: var(--fg);
-  font-size: 13px;
-}
-.controls select {
-  height: 28px;
-  padding: 0 4px;
-  background: var(--btn-bg);
-  cursor: pointer;
-}
-.row input[aria-invalid="true"] {
-  border-color: var(--danger);
-}
-.row input::placeholder,
-.text::placeholder,
-.output::placeholder {
-  color: #7d8590;
-  opacity: 1;
-}
-.controls input[type="checkbox"] {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: #1f6feb;
-  cursor: pointer;
-}
-.controls input[type="checkbox"]:disabled {
-  cursor: not-allowed;
-}
-.controls label {
-  cursor: pointer;
-}
-.tail {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 48px;
-  margin-top: 4px;
-  border: 1px dashed transparent;
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.tailArmed {
-  border-color: var(--border);
+/* While a handle is dragged, nothing underneath should select or react. */
+.workspace[data-resizing] {
+  cursor: col-resize;
+  user-select: none;
 }
 
-/* ───────── Focus rings ─────────
-   globals.css gives buttons/links/inputs a lime outline offset 4px. Inside the GitHub-styled area that
-   looks off (and gets clipped by .segment and the scrolling board), so use GitHub's blue ring. */
-.card :is(button, a, select, input, textarea):focus-visible,
-.board :is(button, a, select, input, textarea):focus-visible {
-  outline: 2px solid #1f6feb;
-  outline-offset: -2px;
-}
-.card :is(select, input[type="checkbox"]):focus-visible {
-  outline-offset: 1px;
-}
-.card textarea:focus-visible,
-.card .row input:focus-visible {
-  border-color: #1f6feb;
-}
-.preset:focus-within {
-  border-color: #1f6feb;
-}
-.handle:focus-visible {
-  outline: 2px solid #1f6feb;
-}
-
-/* ───────── Rendered README (Preview) ───────── */
-.rendered {
-  font-size: 16px;
-  line-height: 1.5;
-  overflow-wrap: break-word;
-}
-.rendered > :first-child {
-  margin-top: 0;
-}
-.rendered > :last-child {
-  margin-bottom: 0;
-}
-.rendered h1,
-.rendered h2,
-.rendered h3,
-.rendered h4,
-.rendered h5,
-.rendered h6 {
-  margin: 24px 0 16px;
-  font-weight: 600;
-  line-height: 1.25;
-}
-.rendered h1,
-.rendered h2 {
-  padding-bottom: 0.3em;
-  border-bottom: 1px solid var(--border-muted);
-}
-.rendered h1 { font-size: 2em; }
-.rendered h2 { font-size: 1.5em; }
-.rendered h3 { font-size: 1.25em; }
-.rendered h4 { font-size: 1em; }
-.rendered h5 { font-size: 0.875em; }
-.rendered h6 { font-size: 0.85em; color: var(--muted); }
-.rendered p,
-.rendered ul,
-.rendered ol,
-.rendered blockquote,
-.rendered pre {
-  margin: 0 0 16px;
-}
-.rendered ul,
-.rendered ol {
-  padding-left: 2em;
-}
-.rendered li + li {
-  margin-top: 0.25em;
-}
-.rendered a {
-  color: var(--link);
-  text-decoration: none;
-}
-.rendered a:hover {
-  text-decoration: underline;
-}
-.rendered code {
-  padding: 0.2em 0.4em;
-  border-radius: 6px;
-  background: rgba(101, 108, 118, 0.2);
-  font: 85% var(--mono);
-}
-.rendered pre {
-  overflow: auto;
-  padding: 16px;
-  border-radius: 6px;
-  background: #151b23;
-  font-size: 85%;
-  line-height: 1.45;
-}
-.rendered pre code {
-  padding: 0;
-  background: none;
-  font-size: 100%;
-}
-.rendered blockquote {
-  padding: 0 1em;
-  border-left: 0.25em solid var(--border);
-  color: var(--muted);
-}
-.rendered hr {
-  height: 0.25em;
-  margin: 24px 0;
-  padding: 0;
-  border: 0;
-  background: var(--border);
-}
-.rendered img {
-  max-width: 100%;
-}
-.figure {
-  margin: 0 0 16px;
-}
-
-/* ───────── Publish card ───────── */
-.publish label {
-  display: block;
-  margin: 16px 0 6px;
-  font-weight: 600;
-}
-.publish .body > label:first-child {
-  margin-top: 0;
-}
-.row {
-  display: flex;
-  gap: 8px;
-}
-.row input {
-  flex: 1;
-  min-width: 0;
-}
-.output {
-  display: block;
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: #010409;
-  color: var(--fg);
-  font: 12px/18px var(--mono);
-  resize: vertical;
-}
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-}
-.btn {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--btn-bg);
-  color: var(--fg);
-  font-size: 14px;
-  font-weight: 500;
-}
-.btn:hover:not(:disabled) {
-  border-color: #9198a1;
-}
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.btn.primary {
-  border-color: rgba(240, 246, 252, 0.1);
-  background: #238636;
-  color: #fff;
-}
-.btn.primary:hover:not(:disabled) {
-  background: #2ea043;
-}
-/* The one-click publish action is a link when GitHub's own page does the committing. */
-a.btn {
-  text-decoration: none;
-}
-.btn.publishBtn {
-  height: 40px;
-  padding: 0 20px;
-  font-size: 15px;
-  font-weight: 600;
-}
-.success {
-  color: #3fb950;
-}
-.success a {
-  color: inherit;
-  font-weight: 600;
-}
-.manual {
-  margin-top: 24px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-.manual summary {
-  color: var(--muted);
-  font-size: 12px;
-  cursor: pointer;
-}
-.manual summary:hover {
-  color: var(--fg);
-}
-.manual[open] summary {
-  margin-bottom: 8px;
-}
-.help {
+/* ───────── Shared bits ───────── */
+.sub {
   margin: 8px 0 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-.help code {
-  font-family: var(--mono);
-}
-.help a,
-.warnings a {
-  color: var(--link);
-  text-decoration: underline;
-  text-underline-offset: 0.2rem;
-}
-.error {
-  color: var(--danger);
-}
-.warnings {
-  margin: 16px 0 0;
-  padding: 0;
-  list-style: none;
-}
-.warnings li {
-  padding: 8px 12px;
-  border: 1px solid rgba(210, 153, 34, 0.4);
-  border-radius: 6px;
-  background: rgba(187, 128, 9, 0.1);
-  color: #d29922;
-  font-size: 12px;
-  line-height: 18px;
-}
-.warnings li + li {
-  margin-top: 6px;
+  color: var(--grey);
+  font-size: 13px;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
 }
 .limit {
-  color: #d29922;
+  color: #b54708;
 }
-.previewNote {
-  margin: 0;
-  padding: 0 24px 16px;
-  color: var(--muted);
-  font-size: 12px;
+.saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--grey);
+  font-size: 13px;
+  letter-spacing: -0.02em;
 }
-.previewFailed {
-  padding: 28px 16px;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  color: var(--muted);
-  text-align: center;
-}
-.previewFailed p {
-  margin: 0 0 12px;
-}
-/* Visually hidden, still announced by screen readers. */
-.srOnly {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0;
 }
 
-/* ───────── Element board ───────── */
-.board {
-  position: sticky;
-  top: 16px;
-  flex: 0 0 296px;
-  width: 296px;
-  max-height: calc(100vh - 32px);
-  overflow: auto;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-}
-.boardHead {
+/* ───────── Elements ───────── */
+.panelHead {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
 }
-.boardHead h2 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-}
-.boardHelp {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 12px;
+.filter {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
 }
 .group {
-  margin-top: 20px;
+  margin-top: 24px;
 }
-.group h3 {
+.groupTitle {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 0 0 8px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  margin: 0 0 4px;
+  color: var(--grey);
+  font-size: 13px;
+  font-weight: 400;
 }
 .group ul {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -650,28 +231,50 @@ a.btn {
 .preset {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: #151b23;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: var(--rule);
   cursor: grab;
+}
+.preset:active {
+  cursor: grabbing;
 }
 .presetHead {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.variant {
-  color: var(--muted);
-  font-weight: 500;
+.grip {
+  flex: none;
+  color: var(--grey);
 }
-/* Thumbnails are drawn by the same renderer as the README, scaled to the board's width. */
-.thumb {
-  position: relative;
+.presetText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.presetTitle {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.variant {
+  color: var(--grey);
+  font-weight: 400;
+}
+.presetText small {
   overflow: hidden;
-  border-radius: 6px;
-  background: #010409;
+  color: var(--grey);
+  font-size: 12px;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thumb {
+  overflow: hidden;
+  border-radius: 10px;
   pointer-events: none;
 }
 .thumbImg {
@@ -681,155 +284,266 @@ a.btn {
 }
 .thumbEmpty {
   width: 100%;
-  background: linear-gradient(110deg, #10151c 30%, #161d26 50%, #10151c 70%);
+  background: linear-gradient(110deg, #ececec 30%, #f7f7f7 50%, #ececec 70%);
   background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
-}
-.thumbText {
-  max-height: 86px;
-  overflow: hidden;
-  padding: 8px 10px;
-  font-size: 12px;
-  line-height: 1.45;
-  -webkit-mask-image: linear-gradient(#000 70%, transparent);
-  mask-image: linear-gradient(#000 70%, transparent);
-}
-.thumbText :is(h1, h2, h3, h4, h5, h6) {
-  margin: 0 0 4px;
-  padding: 0;
-  border: 0;
-  font-size: 13px;
-  font-weight: 600;
-}
-.thumbText :is(p, ul, ol, hr) {
-  margin: 0;
-}
-.thumbText ul,
-.thumbText ol {
-  padding-left: 18px;
-}
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 12px;
-}
-.chips button {
-  padding: 2px 10px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: none;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 20px;
-}
-.chips button:hover {
-  color: var(--fg);
-  border-color: #9198a1;
-}
-.chips .chipOn {
-  border-color: #1f6feb;
-  background: rgba(31, 111, 235, 0.16);
-  color: var(--fg);
 }
 @keyframes shimmer {
   to {
     background-position: -200% 0;
   }
 }
-.preset:hover {
-  border-color: #9198a1;
-}
-.preset:active {
-  cursor: grabbing;
-}
-.grip {
-  flex: none;
-  color: var(--muted);
-}
-.presetText {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-  font-weight: 600;
-}
-.presetText small {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 400;
-}
-.note {
-  margin-left: 8px;
-  color: var(--muted);
-  font-size: 11px;
-  font-style: normal;
-  font-weight: 400;
-}
-.spin {
-  animation: spin 1s linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
-/* ───────── Resizing and side-by-side placement ───────── */
-.sizer {
+/* ───────── The page ───────── */
+.canvasHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+  max-width: 840px;
+  margin: 0 auto 12px;
+  color: var(--grey-dark);
+  font-size: 13px;
+  letter-spacing: -0.02em;
+}
+.path {
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0;
+}
+.path span {
+  padding: 0 2px;
+  color: var(--grey-dark);
+}
+.meta {
+  color: var(--grey-dark);
+}
+.sheet {
+  box-sizing: border-box;
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 28px 20px 20px;
+  border: var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.pageToggle button {
+  padding-inline: 10px;
+  font-size: 11px;
+}
+/* GitHub dark's README background, so transparent cards and Auto cards read exactly as they will there. */
+.sheet {
+  transition: background-color 0.3s var(--ease-ui), border-color 0.3s var(--ease-ui), color 0.3s var(--ease-ui);
+}
+.sheetDark {
+  border-color: #3d444d;
+  background: #0d1117;
+  color: #f0f6fc;
+}
+.sheetDark .blockBar,
+.sheetDark .cardFrame,
+.sheetDark .tail,
+.sheetDark .empty p:last-child {
+  color: #9198a1;
+}
+.sheetDark .selected .blockBar {
+  color: #f0f6fc;
+}
+.sheetDark .block:hover {
+  outline-color: #3d444d;
+}
+.sheetDark .block.selected {
+  outline-color: #f0f6fc;
+}
+.sheetDark .handle:hover {
+  background: #212830;
+  color: #f0f6fc;
+}
+.sheetDark .text {
+  border-color: #3d444d;
+  background: #010409;
+  color: #f0f6fc;
+}
+.sheetDark .text:focus {
+  border-color: #f0f6fc;
+}
+.sheetDark .text::placeholder {
+  color: #9198a1;
+}
+.sheetDark .resize::after {
+  background: #f0f6fc;
+}
+.sheetDark .tail {
+  border-color: #3d444d;
+}
+.sheetDark .armed {
+  border-color: #f0f6fc;
+  color: #f0f6fc;
+}
+.failed {
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 28px 20px;
+  border: var(--rule);
+  background: var(--surface);
+}
+/* A row holds one text block, or cards side by side. Widths are shares of GitHub's 800px column, and
+   the 1% gap is its 8px. Padding (not margin) makes the gaps between rows part of a drop target. */
+.row {
   position: relative;
-  max-width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  column-gap: 1%;
+  row-gap: 16px;
+  padding: 12px 0 22px;
 }
-.sizer .widget,
-.sizer .placeholder {
-  width: 100%;
+.row:first-child {
+  padding-top: 0;
 }
-.resize {
-  position: absolute;
-  top: 0;
-  right: -9px;
+.block {
+  position: relative;
+  min-width: 0;
+  border-radius: 14px;
+  outline: 2px solid transparent;
+  outline-offset: 6px;
+  transition: outline-color 0.2s var(--ease-ui), opacity 0.2s var(--ease-ui);
+}
+.block:hover {
+  outline-color: #dedfe1;
+}
+.block.selected {
+  outline-color: var(--ink);
+}
+.textBlock {
+  flex: 1 1 100%;
+}
+.dragging {
+  opacity: 0.35;
+}
+.blockBar {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 100%;
+  gap: 2px;
+  min-width: 0;
+  margin-bottom: 6px;
+  color: var(--grey);
+}
+.selected .blockBar {
+  color: var(--ink);
+}
+.handle {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: grab;
+}
+.handle:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+.handle:active {
+  cursor: grabbing;
+}
+.blockName {
+  min-width: 0;
+  min-height: 28px;
+  overflow: hidden;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font-size: 12px;
+  letter-spacing: 0.015em;
+  text-align: left;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.text {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px 14px;
+  border: var(--rule);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0;
+  resize: vertical;
+}
+.text:focus {
+  border-color: var(--ink);
+  outline: none;
+}
+.text::placeholder {
+  color: var(--grey);
+  opacity: 1;
+}
+.cardFrame {
+  position: relative;
+  color: var(--grey-dark);
+}
+/* Drag the card's right edge to resize it. The visible bar is narrow; the hit area is wider. */
+.resize {
+  position: absolute;
+  top: 50%;
+  right: -17px;
+  width: 16px;
+  height: 48px;
+  translate: 0 -50%;
+  opacity: 0;
   cursor: ew-resize;
   touch-action: none;
+  transition: opacity 0.2s var(--ease-ui);
 }
 .resize::after {
   content: "";
-  width: 4px;
-  height: min(44px, 60%);
-  border-radius: 2px;
-  background: #1f6feb;
-  opacity: 0;
-  transition: opacity 0.12s;
+  position: absolute;
+  inset: 4px 5px;
+  border-radius: 9999px;
+  background: var(--ink);
 }
-.sizer:hover .resize::after,
-.resize:hover::after,
-.resizing .resize::after {
-  opacity: 0.9;
-}
-.resizing {
-  outline: 1px dashed #1f6feb;
-  outline-offset: 2px;
+.block:hover .resize,
+.selected .resize,
+.resizing .resize {
+  opacity: 1;
 }
 .sizeTag {
   position: absolute;
-  right: 8px;
-  bottom: 8px;
-  padding: 1px 7px;
-  border-radius: 10px;
-  background: rgba(1, 4, 9, 0.85);
-  color: var(--fg);
-  font: 11px/18px var(--mono);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s;
+  right: 0;
+  bottom: -28px;
+  display: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--tag);
+  color: var(--black);
+  font-size: 11px;
+  letter-spacing: 0;
 }
-.sizer:hover .sizeTag,
+.selected .sizeTag,
 .resizing .sizeTag {
-  opacity: 1;
+  display: block;
+}
+.insert {
+  position: absolute;
+  top: -2px;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.row:first-child .insert {
+  top: -14px;
 }
 .insertSide {
   position: absolute;
@@ -838,120 +552,304 @@ a.btn {
   z-index: 1;
   width: 3px;
   border-radius: 2px;
-  background: #1f6feb;
-  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.25);
+  background: var(--accent);
   pointer-events: none;
 }
 .insertLeft {
-  left: -10px;
+  left: -6px;
 }
 .insertRight {
-  right: -10px;
+  right: -6px;
 }
-.size {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.size input[type="range"] {
-  width: 130px;
-  accent-color: #1f6feb;
-}
-.size output {
-  min-width: 5ch;
-  color: var(--fg);
-  font: 12px var(--mono);
-}
-.miniBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--btn-bg);
-  color: var(--fg);
-  font-size: 12px;
-}
-.miniBtn:hover:not(:disabled) {
-  border-color: #9198a1;
-}
-.miniBtn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-/* Preview: images in one paragraph flow side by side and wrap, separated by a space, as on GitHub. */
-.figureRow {
+.empty {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
-  margin: 0 0 16px;
+  gap: 10px;
+  padding: 40px 16px;
+  border: 1.5px dashed transparent;
+  border-radius: 12px;
+}
+.empty p:last-child {
+  margin: 0;
+  color: var(--grey);
+}
+.tail {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60px;
+  margin-top: 8px;
+  border: 1.5px dashed #c4c6c9;
+  border-radius: 12px;
+  color: var(--grey);
+  font-size: 13px;
+  letter-spacing: 0.015em;
+  text-transform: uppercase;
+  transition: border-color 0.2s var(--ease-ui), color 0.2s var(--ease-ui);
+}
+.armed {
+  border-color: var(--ink);
+  color: var(--ink);
 }
 
-@media (max-width: 1011px) {
-  .board {
-    position: static;
-    flex-basis: auto;
-    width: auto;
-    max-height: none;
-    order: -1;
-  }
-  .group ul {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  }
+/* ───────── Inspector ───────── */
+.inspectorTitle {
+  margin-top: 10px;
 }
-@media (max-width: 600px) {
-  .appbar {
-    padding: 8px 12px;
-  }
-  .body {
-    padding: 16px;
-  }
-  .cardHead {
-    flex-wrap: wrap;
-    padding: 8px 12px;
-  }
-  .title {
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-  .segment button {
-    padding: 4px 10px;
-  }
-  .row {
-    flex-direction: column;
-  }
-  .row input {
-    flex: none;
-    width: 100%;
-  }
-  .row .btn {
-    justify-content: center;
-  }
-  .actions .btn {
-    flex: 1 1 100%;
-    justify-content: center;
-  }
-  .board {
-    padding: 12px;
-  }
-  .previewNote {
-    padding: 0 16px 16px;
-  }
-  .empty {
-    padding: 40px 16px;
-  }
-  /* The profile header is look-only chrome and is fixed-width: drop the secondary icon buttons
-     (issues, pull requests, repositories) so it fits phones without sideways scrolling. */
-  .page header > div:last-child > :nth-child(n + 5):nth-child(-n + 7) {
-    display: none;
-  }
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-top: 24px;
 }
-@media (max-width: 400px) {
-  .page header > div:last-child > :nth-child(4) {
-    display: none;
-  }
+.setting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.label {
+  color: var(--grey-dark);
+  font-size: 12px;
+  letter-spacing: 0.015em;
+  text-transform: uppercase;
+}
+.labelRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.opts3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.hint {
+  margin: 0;
+  color: var(--grey);
+  font-size: 12px;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+.opts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.opt {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid #dedfe1;
+  border-radius: 9999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  transition: border-color 0.3s var(--ease-ui), background-color 0.3s var(--ease-ui), color 0.3s var(--ease-ui);
+}
+.opt:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+.opt.optOn {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #ffffff;
+}
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-left: -8px;
+}
+.swatch {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+}
+.swatch span {
+  width: 24px;
+  height: 24px;
+  border-radius: 9999px;
+  /* A ring keeps near-white swatches (mono on a dark card) visible on the white panel. */
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+.swatch.swatchOn {
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+.select {
+  display: flex;
+  width: 100%;
+}
+.select select {
+  width: 100%;
+}
+.range {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--ink);
+}
+.sizing {
+  padding-top: 16px;
+  border-top: var(--rule);
+}
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cheats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 16px;
+  margin: 20px 0 0;
+  padding-top: 16px;
+  border-top: var(--rule);
+  font-size: 13px;
+}
+.cheats dt {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0;
+}
+.cheats dd {
+  margin: 0;
+  color: var(--grey-dark);
+}
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: var(--hairline);
+}
+.spacer {
+  flex: 1;
+}
+.danger {
+  border-color: #b42318;
+  color: #b42318;
+}
+
+/* A usage card's metric order: a short list of draggable rows, numbered in card order. */
+.order {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+.orderList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.orderItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 12px 0 8px;
+  border: 1px solid #dedfe1;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  letter-spacing: -0.01em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: grab;
+  transition: border-color 0.3s var(--ease-ui), opacity 0.2s var(--ease-ui);
+}
+.orderItem:hover,
+.orderItem:focus-visible {
+  border-color: var(--ink);
+}
+.orderItem:active {
+  cursor: grabbing;
+}
+.orderDragging {
+  border-style: dashed;
+  opacity: 0.55;
+}
+.orderGrip {
+  color: var(--grey);
+}
+.orderNum {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: var(--ink);
+  color: #ffffff;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.orderTag {
+  margin-left: auto;
+  color: var(--grey);
+  font-size: 10px;
+}
+
+/* Drag targets over a usage card's figures. They show as outlines while the card is hovered;
+   the one being dragged is filled. Blue reads on both GitHub themes and on every accent. */
+.metricDrag {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.metricSlot {
+  position: absolute;
+  border: 1px dashed transparent;
+  border-radius: 8px;
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  transition: border-color 0.2s var(--ease-ui), background-color 0.2s var(--ease-ui);
+}
+.cardFrame:hover .metricSlot {
+  border-color: rgb(47 129 247 / 0.55);
+}
+.metricSlot:hover {
+  border-style: solid;
+  border-color: #2f81f7;
+}
+.metricDragging .metricSlot {
+  cursor: grabbing;
+}
+.metricHeld,
+.cardFrame:hover .metricHeld {
+  border: 2px solid #2f81f7;
+  background: rgb(47 129 247 / 0.12);
+}
+
+/* Text the owner writes on a card: its title and a usage card's labels. */
+.field {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid #dedfe1;
+  border-radius: 9999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  transition: border-color 0.3s var(--ease-ui);
+}
+.field:hover,
+.field:focus-visible {
+  border-color: var(--ink);
+}
+.field::placeholder {
+  color: var(--grey);
 }

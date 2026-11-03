@@ -56,7 +56,7 @@ async function fixture(
   files: Record<string, unknown[]>,
   run: (home: string) => Promise<void>,
 ) {
-  const home = await mkdtemp(path.join(tmpdir(), "atlas-qa-"));
+  const home = await mkdtemp(path.join(tmpdir(), "vibe-check-qa-"));
   await mkdir(path.join(home, "sessions"));
   try {
     for (const [name, lines] of Object.entries(files))

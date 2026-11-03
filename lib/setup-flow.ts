@@ -36,6 +36,16 @@ export function linkedSite(value: string | undefined): string | null {
   }
 }
 
+// What a dashboard page shows on this copy. A deployed copy always shows the dashboard. A local copy
+// first shows a page pointing to the deployed site (or setup, when not linked yet); choosing
+// "Visit dashboard" there sets a browser-session cookie, after which the local dashboard shows.
+export const LOCAL_DASHBOARD_COOKIE = "vibe_check_local_dashboard";
+export type GateView = "dashboard" | "deployed-only" | "setup";
+export function gateView({ cloud, linked, chosen }: { cloud: boolean; linked: boolean; chosen: boolean }): GateView {
+  if (cloud || chosen) return "dashboard";
+  return linked ? "deployed-only" : "setup";
+}
+
 // Vercel's deploy button sends the user back with `deployment-url` (usually a bare host such as
 // `vibe-check-abc.vercel.app`). Only Vercel's own domains are followed, so this can never be used
 // to bounce visitors to an arbitrary site.
@@ -53,4 +63,21 @@ export function deployRedirectTarget(value: string | null | undefined): string |
   const host = url.hostname.toLowerCase();
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.vercel\.app$/.test(host)) return null;
   return `https://${host}/setup`;
+}
+
+// The deploy button opens Vercel in its own tab while the setup tab waits. When Vercel sends the
+// user back, that tab tells the waiting tab (same origin, so a BroadcastChannel reaches it), which
+// then moves on to the new site's setup. If no tab answers, the returning tab moves on itself.
+export const DEPLOY_CHANNEL = "vibe-check-setup";
+export const DEPLOY_PENDING_KEY = "vibe-check:deploy-pending";
+export type DeployMessage = { type: "deployed"; target: string } | { type: "taken" };
+
+// Messages from other tabs are checked like any other input: only a vercel.app setup page counts.
+export function readDeployMessage(data: unknown): DeployMessage | null {
+  if (!data || typeof data !== "object") return null;
+  const message = data as Record<string, unknown>;
+  if (message.type === "taken") return { type: "taken" };
+  if (message.type !== "deployed" || typeof message.target !== "string") return null;
+  const target = deployRedirectTarget(message.target);
+  return target ? { type: "deployed", target } : null;
 }

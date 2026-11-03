@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import Dashboard from "@/components/dashboard";
+import { DashboardWithUsage } from "@/components/usage-loaders";
 import LocalGate from "@/components/local-gate";
 export const metadata: Metadata = {
-  title: "Claude Atlas · Your work, in perspective",
+  title: "Claude Vibe Check · Your work, in perspective",
   description:
     "Your recorded Claude Code usage: tokens, activity, models and API-equivalent value.",
 };
 export default function ClaudePage() {
-  return <LocalGate><Dashboard key="claude" provider="claude" /></LocalGate>;
+  return <LocalGate><DashboardWithUsage provider="claude" /></LocalGate>;
 }

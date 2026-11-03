@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     );
   if (!isCloud())
     return NextResponse.json(
-      { error: "Ingestion requires ATLAS_MODE=cloud and durable storage." },
+      { error: "Ingestion requires VIBE_CHECK_MODE=cloud and durable storage." },
       { status: 503 },
     );
   let snapshot;

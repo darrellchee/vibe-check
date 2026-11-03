@@ -48,13 +48,13 @@ test("configured dashboard password requires an authentic session cookie", () =>
     () => {
       assert.equal(authorized(request()), false);
       assert.equal(
-        authorized(request({ cookie: "atlas_session=forged" })),
+        authorized(request({ cookie: "vibe_check_session=forged" })),
         false,
       );
       assert.equal(
         authorized(
           request({
-            cookie: `other=value; atlas_session=${sessionToken("private-password")}; next=value`,
+            cookie: `other=value; vibe_check_session=${sessionToken("private-password")}; next=value`,
           }),
         ),
         true,
@@ -62,7 +62,7 @@ test("configured dashboard password requires an authentic session cookie", () =>
       assert.equal(
         authorized(
           request({
-            cookie: `atlas_session=${sessionToken("wrong-password")}`,
+            cookie: `vibe_check_session=${sessionToken("wrong-password")}`,
           }),
         ),
         false,
@@ -70,7 +70,7 @@ test("configured dashboard password requires an authentic session cookie", () =>
       assert.equal(
         authorized(
           request({
-            cookie: `not_atlas_session=${sessionToken("private-password")}`,
+            cookie: `not_vibe_check_session=${sessionToken("private-password")}`,
           }),
         ),
         false,

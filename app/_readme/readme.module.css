@@ -1,0 +1,23 @@
+/* Shared by the README editor and its preview. Colours follow the surrounding text, so the same card
+   placeholder reads on the white editor and on GitHub's dark or light page. */
+.widget {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+}
+.placeholder {
+  padding: 28px 16px;
+  border: 1px dashed color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 12px;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1.45;
+  text-align: center;
+  opacity: 0.85;
+}
+.placeholder a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

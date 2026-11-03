@@ -19,7 +19,7 @@ import { GET as card } from "../app/api/card/route";
 import { GET as install } from "../app/api/install/route";
 
 const env: Record<string, string | undefined> = process.env;
-const ORIGIN = "https://atlas.example";
+const ORIGIN = "https://vibe-check.example";
 
 // A tiny in-memory stand-in for the Upstash REST API, covering the commands the app uses.
 function fakeRedis() {
@@ -54,10 +54,11 @@ async function withDeployment(
   run: (redis: ReturnType<typeof fakeRedis>) => Promise<void>,
 ) {
   const settings: Record<string, string | undefined> = {
-    ATLAS_MODE: undefined, VERCEL: "1", NODE_ENV: "production",
+    VIBE_CHECK_MODE: undefined, VERCEL: "1", NODE_ENV: "production",
     UPSTASH_REDIS_REST_URL: "https://storage.example",
     UPSTASH_REDIS_REST_TOKEN: "storage-fixture-secret",
     KV_REST_API_URL: undefined, KV_REST_API_TOKEN: undefined,
+    REDIS_URL: undefined, TURSO_DATABASE_URL: undefined, TURSO_AUTH_TOKEN: undefined, DATABASE_URL: undefined, POSTGRES_URL: undefined,
     DASHBOARD_PASSWORD: undefined, SYNC_TOKEN: undefined,
     PUBLIC_WIDGET: undefined, PUBLIC_CLAUDE_WIDGET: undefined, PUBLIC_CURSOR_WIDGET: undefined,
     ...overrides,
@@ -222,7 +223,7 @@ test("install script is valid POSIX sh, pinned to this site, and refuses unsafe 
     assert.match(run.stderr, /connect code|Usage/);
   }
 
-  const response = await install(new Request(`${ORIGIN}/api/install`, { headers: { host: "atlas.example" } }));
+  const response = await install(new Request(`${ORIGIN}/api/install`, { headers: { host: "vibe-check.example" } }));
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type")!, /shellscript/);
   assert.equal(response.headers.get("cache-control"), "no-store");

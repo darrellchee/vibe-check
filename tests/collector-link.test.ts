@@ -20,20 +20,20 @@ test("the linked checkout is read back from what the installer writes, on both p
 });
 
 test("unlinking removes only the site and upload token from settings", () => {
-  const before = "ATLAS_MODE=local\nSYNC_URL=https://me.vercel.app\nCURSOR_AUTO_SYNC=true\nexport SYNC_TOKEN=abc\n";
-  assert.equal(withoutLink(before), "ATLAS_MODE=local\nCURSOR_AUTO_SYNC=true\n");
+  const before = "VIBE_CHECK_MODE=local\nSYNC_URL=https://me.vercel.app\nCURSOR_AUTO_SYNC=true\nexport SYNC_TOKEN=abc\n";
+  assert.equal(withoutLink(before), "VIBE_CHECK_MODE=local\nCURSOR_AUTO_SYNC=true\n");
 });
 
 async function fakeComputer(site = "https://me.vercel.app") {
-  const home = await mkdtemp(path.join(tmpdir(), "atlas-home-"));
+  const home = await mkdtemp(path.join(tmpdir(), "vibe-check-home-"));
   const root = path.join(home, ".vibe-check");
   await mkdir(root, { recursive: true });
-  await writeFile(path.join(root, ".env.local"), `ATLAS_MODE=local\nSYNC_URL=${site}\nSYNC_TOKEN=${"a".repeat(64)}\n`, { mode: 0o600 });
+  await writeFile(path.join(root, ".env.local"), `VIBE_CHECK_MODE=local\nSYNC_URL=${site}\nSYNC_TOKEN=${"a".repeat(64)}\n`, { mode: 0o600 });
   const { content } = collectorService({ ...SERVICE, home, platform: "linux", root });
   const file = serviceFile("linux", home);
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, content);
-  return { home, root, file, cwd: await mkdtemp(path.join(tmpdir(), "atlas-clone-")) };
+  return { home, root, file, cwd: await mkdtemp(path.join(tmpdir(), "vibe-check-clone-")) };
 }
 
 test("a clone finds the site through the installed collector, and unlinking stops it", async () => {
@@ -44,11 +44,11 @@ test("a clone finds the site through the installed collector, and unlinking stop
   const commands: string[] = [];
   await unlinkLocal({ ...where, run: async (command, args) => { commands.push([command, ...args].join(" ")); } });
   assert.deepEqual(commands, [
-    "systemctl --user disable --now dev.codex-atlas.collector.service",
+    "systemctl --user disable --now dev.vibe-check.collector.service",
     "systemctl --user daemon-reload",
   ]);
   await assert.rejects(stat(pc.file)); // Service definition removed.
-  assert.equal(await readFile(path.join(pc.root, ".env.local"), "utf8"), "ATLAS_MODE=local\n");
+  assert.equal(await readFile(path.join(pc.root, ".env.local"), "utf8"), "VIBE_CHECK_MODE=local\n");
   assert.equal(await readLocalLink(where), null);
 });
 
@@ -62,19 +62,19 @@ test("an http or missing site never counts as linked", async () => {
 
 test("the unlink endpoint only answers same-site requests on this computer, never on a deployment", async () => {
   const env: Record<string, string | undefined> = process.env;
-  const before = { ATLAS_MODE: env.ATLAS_MODE, HOME: env.HOME, SYNC_URL: env.SYNC_URL };
+  const before = { VIBE_CHECK_MODE: env.VIBE_CHECK_MODE, HOME: env.HOME, SYNC_URL: env.SYNC_URL };
   const request = (host: string, origin?: string) => new Request(`http://${host}/api/setup/unlink`, {
     method: "POST", headers: { host, ...(origin ? { origin } : {}) },
   });
   try {
-    env.HOME = await mkdtemp(path.join(tmpdir(), "atlas-empty-home-"));
+    env.HOME = await mkdtemp(path.join(tmpdir(), "vibe-check-empty-home-"));
     delete env.SYNC_URL;
-    env.ATLAS_MODE = "cloud";
+    env.VIBE_CHECK_MODE = "cloud";
     assert.equal((await unlink(request("127.0.0.1:3100", "http://127.0.0.1:3100"))).status, 404);
-    env.ATLAS_MODE = "local";
+    env.VIBE_CHECK_MODE = "local";
     assert.equal((await unlink(request("127.0.0.1:3100"))).status, 403); // No Origin.
     assert.equal((await unlink(request("127.0.0.1:3100", "https://evil.example"))).status, 403);
-    assert.equal((await unlink(request("atlas.example", "http://atlas.example"))).status, 403); // Not loopback.
+    assert.equal((await unlink(request("vibe-check.example", "http://vibe-check.example"))).status, 403); // Not loopback.
     const ok = await unlink(request("127.0.0.1:3100", "http://127.0.0.1:3100"));
     assert.equal(ok.status, 200); // Nothing linked here, so nothing to stop.
     assert.deepEqual(await ok.json(), { unlinked: true });

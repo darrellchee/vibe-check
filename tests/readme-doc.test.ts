@@ -8,7 +8,7 @@ import { collectUsage } from "../lib/collector";
 import { calendarEmbed, cardOptions, profileEmbed, renderActivityCalendar } from "../lib/profile-card";
 import { parseInline, parseMarkdown, safeUrl } from "../lib/markdown";
 import {
-  insertBlock, MAX_BLOCKS, MAX_TEXT, moveBlock, PLACEHOLDER_ORIGIN, PRESETS, sanitizeBlocks, serializeReadme, starterReadme, stepBlock,
+  insertBlock, MAX_BLOCKS, MAX_TEXT, moveBlock, PLACEHOLDER_ORIGIN, PRESETS, sanitizeBlocks, serializeReadme, starterReadme, stepBlock, themeOf,
   type ReadmeBlock,
 } from "../lib/readme-doc";
 
@@ -17,13 +17,20 @@ test("the starter README is a heading plus the combined card and calendar, and s
   assert.deepEqual(starter.map((b) => b.type), ["text", "usage", "calendar"]);
   assert.deepEqual(sanitizeBlocks(JSON.parse(JSON.stringify(starter))), starter);
   assert.notEqual(starterReadme()[0].id, starter[0].id); // Fresh ids every time.
-  const { markdown, originError } = serializeReadme(starter, "https://atlas.example");
+  const { markdown, originError } = serializeReadme(starter, "https://vibe-check.example");
   assert.equal(originError, "");
-  const images = [...markdown.matchAll(/\]\((https:[^)]+)\)/g)].map((m) => new URL(m[1]));
-  assert.equal(images.length, 2);
+  // Both cards follow the viewer's theme: a dark source and a light fallback each.
+  const images = imageUrls(markdown).map((url) => new URL(url));
+  assert.equal(images.length, 4);
   assert.ok(images.every((url) => url.searchParams.get("provider") === "all"));
-  assert.equal(images[1].searchParams.get("kind"), "calendar");
+  assert.deepEqual(images.map((url) => url.searchParams.get("theme")), ["dark", "light", "dark", "light"]);
+  assert.equal(images[3].searchParams.get("kind"), "calendar");
 });
+
+// Every card image URL in serialized Markdown, in order: Markdown images, <img src> and <source srcset>.
+function imageUrls(markdown: string) {
+  return [...markdown.matchAll(/\]\((https:[^)]+)\)|(?:src|srcset)="([^"]+)"/g)].map((m) => (m[1] ?? m[2]).replace(/&amp;/g, "&"));
+}
 
 const text = (id: string, body = id): ReadmeBlock => ({ id, type: "text", text: body });
 const ids = (blocks: ReadmeBlock[]) => blocks.map((b) => b.id).join("");
@@ -49,22 +56,27 @@ test("every preset is a valid block and serializes to Markdown", () => {
   assert.equal(new Set(PRESETS.map((p) => p.id)).size, PRESETS.length);
   const blocks = PRESETS.map((p, i) => ({ ...structuredClone(p.block), id: `p${i}` }) as ReadmeBlock);
   assert.equal(sanitizeBlocks(blocks).length, PRESETS.length);
-  const { markdown, originError } = serializeReadme(blocks, "https://atlas.example");
+  const { markdown, originError } = serializeReadme(blocks, "https://vibe-check.example");
   assert.equal(originError, "");
-  assert.match(markdown, /!\[My recorded Claude Code usage\]\(https:\/\/atlas\.example\/api\/card\?provider=claude&theme=dark&metrics=tokens%2Csessions&accent=orange\)/);
-  assert.match(markdown, /api\/card\?provider=cursor&theme=dark&metrics=tokens%2Csessions&style=spotlight&accent=blue\)/);
-  assert.match(markdown, /!\[My recorded Cursor activity\]\(https:\/\/atlas\.example\/api\/card\?kind=calendar&provider=cursor&theme=dark&accent=blue\)/);
-  // Codex is lime, the default accent, so its classic card keeps the original, parameter-free URL.
-  assert.match(markdown, /usage\]\(https:\/\/atlas\.example\/api\/card\?provider=codex&theme=dark&metrics=tokens%2Csessions\)/);
+  // Presets follow the viewer's theme, so each card has a dark source and a light image.
+  const urls = imageUrls(markdown);
+  for (const theme of ["dark", "light"]) {
+    assert.ok(urls.includes(`https://vibe-check.example/api/card?provider=claude&theme=${theme}&metrics=tokens%2Csessions&accent=orange`));
+    assert.ok(urls.includes(`https://vibe-check.example/api/card?provider=cursor&theme=${theme}&metrics=tokens%2Csessions&style=spotlight&accent=blue`));
+    assert.ok(urls.includes(`https://vibe-check.example/api/card?kind=calendar&provider=cursor&theme=${theme}&accent=blue`));
+    // Codex is lime, the default accent, so its classic card keeps the original, parameter-free URL.
+    assert.ok(urls.includes(`https://vibe-check.example/api/card?provider=codex&theme=${theme}&metrics=tokens%2Csessions`));
+  }
+  assert.match(markdown, /<img src="https:\/\/vibe-check\.example\/api\/card\?provider=claude&amp;theme=light&amp;metrics=tokens%2Csessions&amp;accent=orange" alt="My recorded Claude Code usage">/);
   // Presets must survive a save and reload unchanged: nothing they set may be dropped by the sanitizer.
   assert.deepEqual(sanitizeBlocks(blocks), blocks);
 });
 
 test("README output joins blocks, and flags a missing public origin instead of emitting a broken image", () => {
   const blocks: ReadmeBlock[] = [text("h", "  ## Hi  "), { id: "u", type: "usage", provider: "codex", theme: "light", metrics: ["requests"] }, text("empty", "  ")];
-  const ok = serializeReadme(blocks, "https://atlas.example");
-  assert.equal(ok.markdown, "  ## Hi\n\n![My recorded Codex usage](https://atlas.example/api/card?provider=codex&theme=light&metrics=requests)\n");
-  for (const origin of ["", "http://localhost:3000", "https://atlas.example/path"]) {
+  const ok = serializeReadme(blocks, "https://vibe-check.example");
+  assert.equal(ok.markdown, "  ## Hi\n\n![My recorded Codex usage](https://vibe-check.example/api/card?provider=codex&theme=light&metrics=requests)\n");
+  for (const origin of ["", "http://localhost:3000", "https://vibe-check.example/path"]) {
     const bad = serializeReadme(blocks, origin);
     assert.ok(bad.originError);
     assert.ok(bad.markdown.includes(PLACEHOLDER_ORIGIN));
@@ -87,7 +99,8 @@ test("stored drafts are rebuilt from known fields only", () => {
   ]);
   assert.deepEqual(clean, [
     { id: "1", type: "text", text: "hi" },
-    { id: "2", type: "usage", provider: "claude", theme: "light", metrics: ["tokens", "requests"] },
+    // The stored order is the card's layout order, so it is kept.
+    { id: "2", type: "usage", provider: "claude", theme: "light", metrics: ["requests", "tokens"] },
     { id: "6", type: "calendar", provider: "cursor", theme: "dark" },
   ]);
   assert.deepEqual(sanitizeBlocks("nope"), []);
@@ -123,10 +136,10 @@ test("Markdown preview parses a safe subset and drops dangerous URLs", () => {
 });
 
 test("activity calendar publishes levels, never exact days or source strings", async () => {
-  assert.equal(cardOptions(new URL("https://atlas.example/api/card")).kind, "usage");
-  assert.equal(cardOptions(new URL("https://atlas.example/api/card?kind=calendar")).kind, "calendar");
+  assert.equal(cardOptions(new URL("https://vibe-check.example/api/card")).kind, "usage");
+  assert.equal(cardOptions(new URL("https://vibe-check.example/api/card?kind=calendar")).kind, "calendar");
   for (const query of ["kind=evil", "kind=usage&kind=calendar", "kind="])
-    assert.throws(() => cardOptions(new URL(`https://atlas.example/api/card?${query}`)));
+    assert.throws(() => cardOptions(new URL(`https://vibe-check.example/api/card?${query}`)));
 
   const snapshot = await collectUsage(path.join(tmpdir(), randomUUID()));
   snapshot.generatedAt = "2026-10-21T08:00:00.000Z"; // a Wednesday
@@ -137,15 +150,16 @@ test("activity calendar publishes levels, never exact days or source strings", a
     day("2026-10-18", 3_000_000), day("2024-01-01", 999_000_000), day("<x>", 5)];
   const svg = renderActivityCalendar(snapshot, "codex", "dark");
   assert.match(svg, /^<svg[^>]*width="720"/);
-  assert.match(svg, /CODEX ATLAS/);
+  assert.match(svg, /CODEX USAGE/);
   assert.match(svg, /10M tokens · 4 active days/);
-  assert.equal((svg.match(/<rect /g) || []).length, 1 + (52 * 7 + 3 + 1) + 5);
-  // 4 active days spread over 4 intensities: one cell per level, plus one legend swatch each.
+  assert.equal((svg.match(/<rect /g) || []).length, 1 + (52 * 7 + 3 + 1));
+  // 4 active days spread over 4 intensities: one cell per level. There is no Less/More legend.
   const swatches = (markup: string, fill: string) => (markup.match(new RegExp(`<rect [^>]*fill="${fill}"`, "g")) || []).length;
-  for (const fill of ["#3b5a24", "#5d8f2e", "#8cc84b", "#b7ea76"]) assert.equal(swatches(svg, fill), 2, fill);
+  for (const fill of ["#3b5a24", "#5d8f2e", "#8cc84b", "#b7ea76"]) assert.equal(swatches(svg, fill), 1, fill);
   for (const leaked of ["secret-model-name", "private-project-path", "<script>", "4000000", "999", "2026-10-20", "&lt;x&gt;"])
     assert.equal(svg.includes(leaked), false, leaked);
   assert.match(renderActivityCalendar(snapshot, "codex", "light"), /#fafbf7/);
+  assert.equal(/Less|More/.test(svg), false);
 
   // Without token data it falls back to human requests, then to unavailable.
   snapshot.availability = { tokens: false, cost: false, sessions: false, humanRequests: true, assistantRequests: false, cacheBreakdown: false };
@@ -153,18 +167,18 @@ test("activity calendar publishes levels, never exact days or source strings", a
   snapshot.availability.humanRequests = false;
   const none = renderActivityCalendar(snapshot, "cursor", "dark");
   assert.match(none, />Unavailable<\/text>/);
-  for (const fill of ["#3b5a24", "#5d8f2e", "#8cc84b", "#b7ea76"]) assert.equal(swatches(none, fill), 1, fill);
+  for (const fill of ["#3b5a24", "#5d8f2e", "#8cc84b", "#b7ea76"]) assert.equal(swatches(none, fill), 0, fill);
 });
 
 test("card route serves the calendar only for a known kind and only when the provider's card is public", async () => {
-  const settings = { ATLAS_MODE: "cloud", PUBLIC_WIDGET: "true", PUBLIC_CLAUDE_WIDGET: "false",
+  const settings = { VIBE_CHECK_MODE: "cloud", PUBLIC_WIDGET: "true", PUBLIC_CLAUDE_WIDGET: "false",
     UPSTASH_REDIS_REST_URL: "https://storage.example", UPSTASH_REDIS_REST_TOKEN: "private-redis-token",
     DASHBOARD_PASSWORD: "private-dashboard-password" };
   const before = Object.fromEntries(Object.keys(settings).map((key) => [key, process.env[key]]));
   const realFetch = globalThis.fetch;
   const snapshot = await collectUsage(path.join(tmpdir(), randomUUID()));
   let reads = 0;
-  const request = (query = "") => new Request(`https://atlas.example/api/card${query}`);
+  const request = (query = "") => new Request(`https://vibe-check.example/api/card${query}`);
   try {
     for (const [key, value] of Object.entries(settings)) process.env[key] = value;
     globalThis.fetch = async (_url, init) => {
@@ -181,7 +195,7 @@ test("card route serves the calendar only for a known kind and only when the pro
     assert.equal(calendar.headers.get("x-content-type-options"), "nosniff");
     const calendarSvg = await calendar.text();
     assert.ok(calendarSvg.includes('<title id="title">Codex activity</title>'));
-    assert.ok(calendarSvg.includes("Last 12 months"));
+    assert.ok(calendarSvg.includes("active days") || calendarSvg.includes("Unavailable")); // the headline
 
     for (const query of ["", "?kind=usage"]) {
       const usageResponse = await card(request(query));
@@ -220,7 +234,7 @@ async function calendarSnapshot(generatedAt: string, rows: [string, number, numb
   return snapshot;
 }
 const rectCount = (svg: string) => (svg.match(/<rect /g) || []).length;
-const monthLabels = (svg: string) => [...svg.matchAll(/<text x="(\d+)" y="56"[^>]*>(\w+)<\/text>/g)].map((m) => ({ x: Number(m[1]), name: m[2] }));
+const monthLabels = (svg: string) => [...svg.matchAll(/<text x="([\d.]+)" y="56"[^>]*>(\w+)<\/text>/g)].map((m) => ({ x: Number(m[1]), name: m[2] }));
 
 test("activity calendar ignores impossible dates and cannot be moved by a far-future row", async () => {
   const snapshot = await calendarSnapshot("2026-10-21T08:00:00.000Z", [
@@ -228,14 +242,14 @@ test("activity calendar ignores impossible dates and cannot be moved by a far-fu
   ]);
   const svg = renderActivityCalendar(snapshot, "codex", "dark");
   assert.match(svg, /5 tokens · 1 active day</);
-  assert.equal(rectCount(svg), 1 + (52 * 7 + 3 + 1) + 5); // the window still ends on 2026-10-21
+  assert.equal(rectCount(svg), 1 + (52 * 7 + 3 + 1)); // the window still ends on 2026-10-21
   assert.equal(svg.includes("900M"), false);
 
   // One day beyond the generated date is allowed (timezones ahead of UTC); anything later is not.
   const ahead = await calendarSnapshot("2026-10-21T20:00:00.000Z", [["2026-10-22", 7], ["2026-10-23", 99], ["2027-01-01", 99]]);
   const aheadSvg = renderActivityCalendar(ahead, "codex", "dark");
   assert.match(aheadSvg, /7 tokens · 1 active day</);
-  assert.equal(rectCount(aheadSvg), 1 + (52 * 7 + 4 + 1) + 5); // ends on Thursday 2026-10-22
+  assert.equal(rectCount(aheadSvg), 1 + (52 * 7 + 4 + 1)); // ends on Thursday 2026-10-22
 });
 
 test("activity calendar uses requests for Cursor, tokens for others, and pluralises active days", async () => {
@@ -267,7 +281,8 @@ test("activity calendar never prints two month labels on top of each other", asy
   const labels = monthLabels(renderActivityCalendar(collision, "codex", "dark"));
   assert.equal(labels.some((l) => l.x === 26), false, "the partial first month is dropped");
   assert.equal(labels[0].name, "Nov");
-  assert.equal(labels[0].x, 26 + 2 * 12);
+  // Columns span the card evenly (26 to 694), so a step is 668 / 52⅚ ≈ 12.6px.
+  assert.ok(Math.abs(labels[0].x - (26 + 2 * (668 / (52 + 5 / 6)))) < 0.1, String(labels[0].x));
   // And for every end date in a full year, labels stay at least three columns apart.
   for (let day = 0; day < 366; day++) {
     const generatedAt = new Date(Date.UTC(2026, 0, 1) + day * 86_400_000).toISOString();
@@ -288,7 +303,7 @@ test("embed origins give friendly errors and reject hosts GitHub cannot reach", 
     (origin: string) => profileEmbed(origin, "codex", "dark", ["tokens"]),
   ];
   for (const embed of embeds) {
-    for (const origin of ["atlas.example", "", "   ", "not a url", "//atlas.example"])
+    for (const origin of ["vibe-check.example", "", "   ", "not a url", "//vibe-check.example"])
       assert.throws(() => embed(origin), { message: help }, JSON.stringify(origin));
     const priv = /private or local addresses/;
     for (const origin of [
@@ -298,23 +313,23 @@ test("embed origins give friendly errors and reject hosts GitHub cannot reach", 
       "https://0.0.0.0", "https://[::1]", "https://[2001:db8::1]", "https://[::ffff:127.0.0.1]:8443", "https://2130706433", "https://0x7f.1",
     ]) assert.throws(() => embed(origin), priv, origin);
     for (const origin of [
-      "https://atlas.example", "https://atlas.example/", "https://my-app.vercel.app", "https://203.0.113.5", "https://172.15.0.1",
-      "https://172.32.0.1", "https://100.63.0.1", "https://100.128.0.1", "https://192.169.0.1", "https://11.0.0.1", "https://atlas.example:8443",
+      "https://vibe-check.example", "https://vibe-check.example/", "https://my-app.vercel.app", "https://203.0.113.5", "https://172.15.0.1",
+      "https://172.32.0.1", "https://100.63.0.1", "https://100.128.0.1", "https://192.169.0.1", "https://11.0.0.1", "https://vibe-check.example:8443",
     ]) assert.doesNotThrow(() => embed(origin), origin);
     // Existing rejections keep their wording.
-    for (const origin of ["http://atlas.example", "https://u:p@atlas.example", "https://atlas.example/x", "https://atlas.example/?a=1", "https://atlas.example/#x", "javascript:alert(1)"])
+    for (const origin of ["http://vibe-check.example", "https://u:p@vibe-check.example", "https://vibe-check.example/x", "https://vibe-check.example/?a=1", "https://vibe-check.example/#x", "javascript:alert(1)"])
       assert.throws(() => embed(origin), /public HTTPS dashboard origin/, origin);
   }
 });
 
 test("serializeReadme passes friendly origin errors through unchanged", () => {
   const widget: ReadmeBlock = { id: "c", type: "calendar", provider: "codex", theme: "dark" };
-  assert.equal(serializeReadme([widget], "atlas.example").originError, "Enter a full https:// address, for example https://your-instance.vercel.app");
+  assert.equal(serializeReadme([widget], "vibe-check.example").originError, "Enter a full https:// address, for example https://your-instance.vercel.app");
   assert.match(serializeReadme([widget], "https://192.168.0.2").originError, /GitHub cannot load images from private or local addresses/);
   assert.match(serializeReadme([widget], "https://localhost:3000").originError, /private or local/);
-  assert.match(serializeReadme([widget], "http://atlas.example").originError, /public HTTPS dashboard origin/);
+  assert.match(serializeReadme([widget], "http://vibe-check.example").originError, /public HTTPS dashboard origin/);
   assert.equal(serializeReadme([widget], "https://203.0.113.5").originError, "");
-  assert.equal(serializeReadme([text("t", "hi")], "atlas.example").originError, "");
+  assert.equal(serializeReadme([text("t", "hi")], "vibe-check.example").originError, "");
 });
 
 test("text blocks keep their indentation; only leading blank lines and trailing space are removed", () => {
@@ -427,7 +442,7 @@ test("Markdown correctness: unsafe images stay literal, *** nests, URLs may hold
 });
 
 // ───────── Resizable cards and side-by-side rows ─────────
-import { joinTarget, leaveRow, MAX_WIDTH, MIN_WIDTH, placeBlock, rowRanges, sameLayout, snapWidth, widthOf } from "../lib/readme-doc";
+import { joinTarget, leaveRow, maxWidthFor, MAX_WIDTH, resizeBlock, MIN_WIDTH, placeBlock, rowRanges, sameLayout, snapWidth, widthOf } from "../lib/readme-doc";
 
 const usage = (id: string, extra: Partial<Extract<ReadmeBlock, { type: "usage" }>> = {}): ReadmeBlock =>
   ({ id, type: "usage", provider: "codex", theme: "dark", metrics: ["tokens"], ...extra });
@@ -527,17 +542,17 @@ test("a lone card can join the card at the end of the previous row", () => {
 });
 
 test("resized and side-by-side cards serialize to <img> tags; untouched cards stay Markdown", () => {
-  const origin = "https://atlas.example";
+  const origin = "https://vibe-check.example";
   const plain = serializeReadme([usage("a")], origin).markdown;
-  assert.match(plain, /^!\[My recorded Codex usage\]\(https:\/\/atlas\.example\/api\/card\?/);
+  assert.match(plain, /^!\[My recorded Codex usage\]\(https:\/\/vibe-check\.example\/api\/card\?/);
   const sized = serializeReadme([usage("a", { width: 300 })], origin).markdown;
-  assert.equal(sized, '<p>\n  <img src="https://atlas.example/api/card?provider=codex&amp;theme=dark&amp;metrics=tokens" alt="My recorded Codex usage" width="300">\n</p>\n');
+  assert.equal(sized, '<p>\n  <img src="https://vibe-check.example/api/card?provider=codex&amp;theme=dark&amp;metrics=tokens" alt="My recorded Codex usage" width="300">\n</p>\n');
   const row = serializeReadme([text("h", "## Hi"), usage("a", { row: "r", width: 390 }), cal("b", { row: "r", width: 390 }), text("t", "bye")], origin).markdown;
   assert.equal(row, [
     "## Hi", "",
     "<p>",
-    '  <img src="https://atlas.example/api/card?provider=codex&amp;theme=dark&amp;metrics=tokens" alt="My recorded Codex usage" width="390">',
-    '  <img src="https://atlas.example/api/card?kind=calendar&amp;provider=claude&amp;theme=light" alt="My recorded Claude Code activity" width="390">',
+    '  <img src="https://vibe-check.example/api/card?provider=codex&amp;theme=dark&amp;metrics=tokens" alt="My recorded Codex usage" width="390">',
+    '  <img src="https://vibe-check.example/api/card?kind=calendar&amp;provider=claude&amp;theme=light" alt="My recorded Claude Code activity" width="390">',
     "</p>", "", "bye", "",
   ].join("\n"));
   // A row of two with no explicit widths still becomes one paragraph (natural size, no width attribute).
@@ -572,26 +587,36 @@ test("stored layout is validated: widths must be sane integers, row ids short st
 });
 
 // ───────── Card styles, accents and presets ─────────
-import { cardAccents, cardSize, cardStyles, providerAccent, renderProfileCard, stylesFor } from "../lib/profile-card";
+import { accentColor, cardAccents, cardFonts, cardSize, cardStyles, fontStack, providerAccent, renderProfileCard, stylesFor } from "../lib/profile-card";
 import { sampleSnapshot } from "../lib/sample-snapshot";
 import { PRESET_GROUPS } from "../lib/readme-doc";
 
 test("cards take a validated style and accent; defaults stay out of embed URLs", () => {
-  const options = (query: string) => cardOptions(new URL(`https://atlas.example/api/card?${query}`));
+  const options = (query: string) => cardOptions(new URL(`https://vibe-check.example/api/card?${query}`));
   assert.deepEqual([options("").style, options("").accent], ["classic", "lime"]);
   assert.deepEqual([options("style=compact&accent=violet").style, options("style=spotlight&accent=mono").accent], ["compact", "mono"]);
   assert.equal(options("kind=calendar&style=compact").style, "compact");
   for (const query of ["style=big", "style=", "style=compact&style=classic", "accent=pink", "accent=", "accent=lime&accent=blue",
     "kind=calendar&style=spotlight", "style=<script>", "accent=ORANGE"])
     assert.throws(() => options(query), query);
-  assert.deepEqual(stylesFor("calendar"), ["classic", "compact"]);
+  // Links made when "transparent" was a style keep working: classic (calendars: compact) with no border.
+  assert.deepEqual([options("style=transparent").style, options("style=transparent").border], ["classic", "none"]);
+  assert.deepEqual([options("kind=calendar&style=transparent").style, options("kind=calendar&style=transparent").border], ["compact", "none"]);
+  assert.deepEqual([options("").border, options("border=none").border, options("style=spotlight&border=solid").border], ["solid", "none", "solid"]);
+  for (const query of ["border=", "border=dashed", "border=none&border=solid", "border=NONE"]) assert.throws(() => options(query), query);
+  assert.deepEqual([options("").font, options("font=serif").font, options("kind=calendar&font=mono").font], ["system", "serif", "mono"]);
+  for (const query of ["font=comic", "font=", "font=serif&font=mono", "font=<script>", "font=SERIF"]) assert.throws(() => options(query), query);
+  const fonted = new URL(profileEmbed("https://vibe-check.example", "codex", "dark", ["tokens"], { font: "serif" }).image);
+  assert.equal(fonted.searchParams.get("font"), "serif");
+  assert.equal(new URL(profileEmbed("https://vibe-check.example", "codex", "dark", ["tokens"], { font: "system" }).image).searchParams.has("font"), false);
+  assert.deepEqual(stylesFor("calendar"), ["classic", "compact", "bars", "months"]);
   assert.deepEqual(stylesFor("usage"), cardStyles);
 
-  const plain = profileEmbed("https://atlas.example", "codex", "dark", ["tokens"]);
-  assert.equal(profileEmbed("https://atlas.example", "codex", "dark", ["tokens"], { style: "classic", accent: "lime" }).image, plain.image);
-  const styled = new URL(profileEmbed("https://atlas.example", "claude", "light", ["tokens"], { style: "compact", accent: "orange" }).image);
+  const plain = profileEmbed("https://vibe-check.example", "codex", "dark", ["tokens"]);
+  assert.equal(profileEmbed("https://vibe-check.example", "codex", "dark", ["tokens"], { style: "classic", accent: "lime" }).image, plain.image);
+  const styled = new URL(profileEmbed("https://vibe-check.example", "claude", "light", ["tokens"], { style: "compact", accent: "orange" }).image);
   assert.deepEqual([styled.searchParams.get("style"), styled.searchParams.get("accent")], ["compact", "orange"]);
-  const calendar = new URL(calendarEmbed("https://atlas.example", "cursor", "dark", { style: "compact", accent: "blue" }).image);
+  const calendar = new URL(calendarEmbed("https://vibe-check.example", "cursor", "dark", { style: "compact", accent: "blue" }).image);
   assert.deepEqual([calendar.searchParams.get("kind"), calendar.searchParams.get("style"), calendar.searchParams.get("accent")], ["calendar", "compact", "blue"]);
 });
 
@@ -619,9 +644,40 @@ test("every style and accent renders a well-formed card of the advertised size, 
   assert.match(renderProfileCard(snapshot, "codex", "dark", ["sessions", "tokens"], { style: "spotlight" }), /font-size="54"[^>]*>[\d.,KMB]+<\/text>/);
   const classic = renderActivityCalendar(snapshot, "codex", "dark");
   const slim = renderActivityCalendar(snapshot, "codex", "dark", { style: "compact" });
-  assert.ok(classic.includes("available history, not verified account lifetime</text>"));
+  assert.equal(classic.includes("available history, not verified account lifetime</text>"), false); // no footer on any card
   assert.equal(slim.includes("available history, not verified account lifetime</text>"), false);
   assert.match(slim, /<desc id="desc">[^<]*Available history, not verified account lifetime\./); // the honesty note stays in the description
+  // Transparent draws no card: no background or border rectangle, no dot, no divider. The text stays.
+  const clear = renderProfileCard(snapshot, "codex", "dark", ["tokens", "sessions"], { border: "none" });
+  assert.equal(clear.includes("<rect"), false);
+  assert.equal(clear.includes("<circle"), false);
+  for (const style of ["classic", "spotlight", "compact"] as const) // no card has the accent dot
+    assert.equal(renderProfileCard(snapshot, "codex", "dark", ["tokens"], { style }).includes("<circle"), false, style);
+  assert.equal(clear.includes("<path"), false);
+  assert.match(clear, /RECORDED TOKENS/);
+  assert.doesNotMatch(clear, /<text[^>]*>(Updated|Last synced) 20/); // no sync-time or "available history" footer (the <desc> keeps it)
+  assert.equal(clear.includes("not verified account lifetime</text>"), false);
+  assert.match(clear, /<desc id="desc">[^<]*Available history, not verified account lifetime\./); // the note stays in the description
+  assert.ok(cardSize("calendar", "compact").height < cardSize("calendar").height);
+  // The all-harnesses card carries the personal title; harness cards keep "<NAME> USAGE".
+  assert.match(renderProfileCard(snapshot, "all", "dark", ["tokens"]), />MY TOTAL AI USAGE<\/text>/);
+  assert.match(renderActivityCalendar(snapshot, "all", "dark"), />MY TOTAL AI USAGE<\/text>/);
+  assert.match(renderProfileCard(snapshot, "codex", "dark", ["tokens"]), />CODEX USAGE<\/text>/);
+  assert.equal(renderProfileCard(snapshot, "codex", "dark", ["tokens"]).includes("<rect"), true);
+  const clearCalendar = renderActivityCalendar(snapshot, "codex", "dark", { border: "none" });
+  assert.equal(clearCalendar.includes('rx="16"'), false); // no card rectangle; the day cells remain
+  assert.equal(clearCalendar.includes("<path"), false);
+  assert.equal(clearCalendar.includes("not verified account lifetime</text>"), false);
+  assert.ok(clearCalendar.includes('rx="2"'));
+  // Typography swaps the font stack only; the default is byte-identical to a call without a look.
+  assert.equal(renderProfileCard(snapshot, "codex", "dark", ["tokens"], { font: "system" }), renderProfileCard(snapshot, "codex", "dark", ["tokens"]));
+  for (const font of cardFonts) {
+    for (const svg of [renderProfileCard(snapshot, "codex", "dark", ["tokens"], { font }), renderActivityCalendar(snapshot, "codex", "dark", { font })]) {
+      assert.ok(svg.includes(`font-family="${fontStack(font)}"`), font);
+    }
+  }
+  assert.ok(cardFonts.length >= 10);
+  assert.ok(renderProfileCard(snapshot, "codex", "dark", ["tokens"], { font: "mono" }).includes("Menlo"));
   // An accent changes colours only: the default accent is still byte-identical to a call without a look.
   assert.equal(renderProfileCard(snapshot, "codex", "dark", ["tokens"], { style: "classic", accent: "lime" }), renderProfileCard(snapshot, "codex", "dark", ["tokens"]));
   assert.notEqual(renderProfileCard(snapshot, "codex", "dark", ["tokens"], { accent: "violet" }), renderProfileCard(snapshot, "codex", "dark", ["tokens"]));
@@ -633,22 +689,35 @@ test("every style and accent renders a well-formed card of the advertised size, 
 });
 
 test("presets: each provider has distinct, ready-made looks that survive saving", () => {
-  assert.deepEqual(PRESET_GROUPS, ["Usage cards", "Activity calendars", "Markdown"]);
+  assert.deepEqual(PRESET_GROUPS, ["Usage cards", "Activity calendars", "Usage trends", "Model mix", "Model ledgers", "Usage by harness", "Markdown"]);
   const usage = PRESETS.filter((p) => p.group === "Usage cards"), calendars = PRESETS.filter((p) => p.group === "Activity calendars");
   for (const provider of ["codex", "claude", "cursor", "antigravity"] as const) {
     const mine = usage.filter((p) => p.provider === provider);
-    assert.deepEqual(mine.map((p) => p.variant), ["Classic", "Compact", "Spotlight", "Light"]);
-    assert.deepEqual(calendars.filter((p) => p.provider === provider).map((p) => p.variant), ["Classic", "Compact", "Light"]);
-    for (const preset of [...mine, ...calendars.filter((p) => p.provider === provider)])
+    assert.deepEqual(mine.map((p) => p.variant), ["Classic", "Compact", "Spotlight"]);
+    assert.deepEqual(calendars.filter((p) => p.provider === provider).map((p) => p.variant), ["Classic", "Compact"]);
+    for (const group of ["Usage trends", "Model mix", "Model ledgers"] as const)
+      assert.deepEqual(PRESETS.filter((p) => p.group === group && p.provider === provider).map((p) => p.variant), ["Classic", "Compact"]);
+    for (const preset of PRESETS.filter((p) => p.provider === provider))
       assert.equal((preset.block as { accent?: string }).accent, providerAccent[provider]);
   }
   // Every preset is distinguishable: no two card presets produce the same embed URL.
   const urls = PRESETS.filter((p) => p.block.type !== "text").map((p) => {
     const b = { ...p.block, id: "x" } as ReadmeBlock;
-    return serializeReadme([b], "https://atlas.example").markdown;
+    return serializeReadme([b], "https://vibe-check.example").markdown;
   });
   assert.equal(new Set(urls).size, urls.length);
   for (const preset of PRESETS.filter((p) => p.group === "Markdown")) assert.equal(preset.provider, undefined);
+});
+
+test("stored typography is validated and the default is not stored", () => {
+  const clean = sanitizeBlocks([
+    { id: "1", type: "usage", provider: "codex", theme: "dark", metrics: ["tokens"], font: "serif" },
+    { id: "2", type: "calendar", provider: "codex", theme: "dark", font: "mono" },
+    { id: "3", type: "usage", provider: "codex", theme: "dark", metrics: ["tokens"], font: "system" },
+    { id: "4", type: "usage", provider: "codex", theme: "dark", metrics: ["tokens"], font: "Comic Sans" },
+    { id: "5", type: "usage", provider: "codex", theme: "dark", metrics: ["tokens"], font: ["serif"] },
+  ]);
+  assert.deepEqual(clean.map((b) => ("font" in b ? b.font : undefined)), ["serif", "mono", undefined, undefined, undefined]);
 });
 
 test("stored styles are validated per kind", () => {
@@ -685,16 +754,228 @@ test("sample data is deterministic, plausible and never mistaken for the real th
 test("All presets lead with tokens, sessions and cost, and survive a save and reload", () => {
   const all = PRESETS.filter((p) => p.provider === "all");
   assert.deepEqual(all.map((p) => `${p.group}/${p.variant}`), [
-    "Usage cards/Classic", "Usage cards/Compact", "Usage cards/Spotlight", "Usage cards/Light",
-    "Activity calendars/Classic", "Activity calendars/Compact", "Activity calendars/Light",
+    "Usage cards/Classic", "Usage cards/Compact", "Usage cards/Spotlight",
+    "Activity calendars/Classic", "Activity calendars/Compact",
+    "Usage trends/Classic", "Usage trends/Compact", "Model mix/Classic", "Model mix/Compact", "Model ledgers/Classic", "Model ledgers/Compact",
+    "Usage by harness/Bar", "Usage by harness/Pie",
   ]);
   const usage = all[0].block;
   assert.ok(usage.type === "usage" && usage.metrics.join() === "tokens,sessions,cost");
   const blocks = all.map((p, i) => ({ ...p.block, id: `b${i}` }) as ReadmeBlock);
   assert.deepEqual(sanitizeBlocks(JSON.parse(JSON.stringify(blocks))), blocks);
-  const { markdown, originError } = serializeReadme(blocks.slice(0, 1).concat(blocks.slice(4, 5)), "https://atlas.example");
+  const { markdown, originError } = serializeReadme(blocks.slice(0, 1).concat(blocks.slice(4, 5)), "https://vibe-check.example");
   assert.equal(originError, "");
   assert.match(markdown, /provider=all/);
   assert.match(markdown, /metrics=tokens%2Csessions%2Ccost|metrics=tokens,sessions,cost/);
-  assert.match(markdown, /kind=calendar&provider=all/);
+  assert.match(markdown, /kind=calendar&amp;provider=all/);
+});
+
+test("resizing a card in a row stops at the room its neighbours leave", () => {
+  const row: ReadmeBlock[] = [usage("a", { row: "r", width: 390 }), usage("b", { row: "r", width: 390 }), text("t")];
+  assert.equal(maxWidthFor(row, "a"), 400); // 800 - 390 - 8, snapped down to 10px
+  assert.equal(widthOf(resizeBlock(row, "a", 800)[0]), 400);
+  assert.equal(widthOf(resizeBlock(row, "a", 250)[0]), 250);
+  assert.deepEqual(resizeBlock(row, "a", 250).map(widthOf), [250, 390, 0]); // neighbours keep their sizes
+  // Snapping and limits still apply, and a card on its own may use the full width.
+  assert.equal(widthOf(resizeBlock(row, "b", 10)[1]), MIN_WIDTH);
+  const alone: ReadmeBlock[] = [usage("a", { width: 300 }), text("t")];
+  assert.equal(maxWidthFor(alone, "a"), MAX_WIDTH);
+  assert.equal(widthOf(resizeBlock(alone, "a", 9999)[0]), MAX_WIDTH);
+  assert.equal(widthOf(resizeBlock(alone, "a", 333)[0]), 330);
+  // Text blocks never gain a width.
+  assert.deepEqual(resizeBlock(alone, "t", 300)[1], alone[1]);
+  // A row of three: each card keeps room for the others at their minimum or current size.
+  const three: ReadmeBlock[] = [usage("a", { row: "r", width: 250 }), usage("b", { row: "r", width: 250 }), usage("c", { row: "r", width: 250 })];
+  assert.equal(maxWidthFor(three, "c"), 280); // 800 - 500 - 16 = 284, snapped down to 10px
+});
+
+test("auto cards follow the viewer's GitHub theme with a <picture>; fixed themes stay plain images", () => {
+  const origin = "https://vibe-check.example";
+  const usage = (id: string, theme: "auto" | "dark" | "light", extra: Partial<ReadmeBlock> = {}) =>
+    ({ id, type: "usage", provider: "codex", theme, metrics: ["tokens"], ...extra }) as ReadmeBlock;
+  assert.equal(serializeReadme([usage("a", "auto")], origin).markdown, [
+    "<picture>",
+    '  <source media="(prefers-color-scheme: dark)" srcset="https://vibe-check.example/api/card?provider=codex&amp;theme=dark&amp;metrics=tokens">',
+    '  <img src="https://vibe-check.example/api/card?provider=codex&amp;theme=light&amp;metrics=tokens" alt="My recorded Codex usage">',
+    "</picture>",
+    "",
+  ].join("\n"));
+  // Side by side, each auto card is its own <picture>, with the width on its <img>; a fixed one stays an <img>.
+  const row = serializeReadme([usage("a", "auto", { width: 390, row: "r" }), usage("b", "dark", { width: 390, row: "r" })], origin).markdown;
+  assert.equal(row, [
+    "<p>",
+    "  <picture>",
+    '    <source media="(prefers-color-scheme: dark)" srcset="https://vibe-check.example/api/card?provider=codex&amp;theme=dark&amp;metrics=tokens">',
+    '    <img src="https://vibe-check.example/api/card?provider=codex&amp;theme=light&amp;metrics=tokens" alt="My recorded Codex usage" width="390">',
+    "  </picture>",
+    '  <img src="https://vibe-check.example/api/card?provider=codex&amp;theme=dark&amp;metrics=tokens" alt="My recorded Codex usage" width="390">',
+    "</p>",
+    "",
+  ].join("\n"));
+  assert.equal(serializeReadme([usage("a", "light")], origin).markdown,
+    "![My recorded Codex usage](https://vibe-check.example/api/card?provider=codex&theme=light&metrics=tokens)\n");
+  // "auto" survives a save and reload; unknown themes are still dropped.
+  const saved = [usage("a", "auto"), { id: "c", type: "calendar", provider: "claude", theme: "auto" }] as ReadmeBlock[];
+  assert.deepEqual(sanitizeBlocks(JSON.parse(JSON.stringify(saved))), saved);
+  assert.deepEqual(sanitizeBlocks([{ id: "x", type: "calendar", provider: "claude", theme: "system" }]), []);
+});
+
+test("cards with no border always follow the viewer's theme, and saved transparent cards become no-border cards", () => {
+  const origin = "https://vibe-check.example";
+  const fixed = [
+    { id: "a", type: "usage", provider: "all", theme: "dark", metrics: ["tokens"], border: "none" },
+    { id: "b", type: "calendar", provider: "claude", theme: "light", style: "transparent" },
+    { id: "c", type: "usage", provider: "codex", theme: "dark", metrics: ["tokens"], style: "compact" },
+    { id: "d", type: "usage", provider: "codex", theme: "dark", metrics: ["tokens"], style: "transparent" },
+    { id: "e", type: "usage", provider: "codex", theme: "dark", metrics: ["tokens"], border: "dashed" },
+  ];
+  // Loading a saved draft repairs them; bordered cards keep their fixed theme.
+  const saved = sanitizeBlocks(fixed);
+  assert.deepEqual(saved.map((b) => (b.type === "text" ? "" : b.theme)), ["auto", "auto", "dark", "auto", "dark"]);
+  assert.deepEqual(saved.map((b) => (b.type === "text" ? "" : `${b.style ?? "classic"}/${b.border ?? "solid"}`)),
+    ["classic/none", "compact/none", "compact/solid", "classic/none", "classic/solid"]);
+  // Even unsanitized, the README gives a no-border card both a dark and a light image.
+  const markdown = serializeReadme([fixed[0] as ReadmeBlock], origin).markdown;
+  assert.match(markdown, /<source media="\(prefers-color-scheme: dark\)" srcset="[^"]*theme=dark[^"]*border=none/);
+  assert.match(markdown, /<img src="[^"]*theme=light[^"]*border=none/);
+  assert.equal(themeOf({ theme: "light", border: "none" }), "auto");
+  assert.equal(themeOf({ theme: "light" }), "light");
+  assert.equal(profileEmbed(origin, "codex", "dark", ["tokens"]).image.includes("border"), false); // the default stays out of the URL
+});
+
+test("accent colours are deeper on light cards than on dark ones", () => {
+  for (const accent of cardAccents) assert.notEqual(accentColor(accent, "light"), accentColor(accent, "dark"));
+  assert.equal(accentColor("lime", "light"), "#426620");
+});
+
+// ───────── Usage trend, model mix and model ledger ─────────
+import { modelRows, renderCard, renderModelLedger, renderModelMix, renderTrendChart, widgetEmbed } from "../lib/profile-card";
+import type { ModelUsage, UsageSnapshot } from "../lib/types";
+
+const withModels = (count: number): UsageSnapshot => {
+  const base = sampleSnapshot("codex", Date.parse("2026-10-21T08:00:00Z"));
+  const models: ModelUsage[] = Array.from({ length: count }, (_, i) => ({
+    model: `model-${i + 1}`, totalTokens: (count - i) * 1000, inputTokens: (count - i) * 600, cachedInputTokens: 0, cacheWriteTokens: 0,
+    outputTokens: (count - i) * 400, reasoningTokens: 0, costUsd: count - i, requests: 1, priced: i !== 1, unpricedTokens: 0,
+  }));
+  return { ...base, models };
+};
+
+test("model cards show the six biggest models and fold the rest into Other", () => {
+  const rows = modelRows(withModels(9));
+  assert.deepEqual(rows.map((r) => r.label), ["model-1", "model-2", "model-3", "model-4", "model-5", "model-6", "Other (3)"]);
+  assert.equal(rows[6].totalTokens, 3000 + 2000 + 1000);
+  assert.equal(rows[6].costUsd, 6);
+  assert.equal(modelRows(withModels(6)).length, 6); // six or fewer: no Other row
+  assert.deepEqual(modelRows({ ...withModels(3), availability: { tokens: false, cost: true, sessions: true, humanRequests: true, assistantRequests: false, cacheBreakdown: false } }), []);
+  const ledger = renderModelLedger(withModels(9), "codex", "dark");
+  assert.match(ledger, />Other \(3\)<\/text>/);
+  assert.match(ledger, />9 models<\/text>/);
+  assert.match(ledger, />\$8\.00\+<\/text>/); // partly unpriced cost is marked with +
+  const mix = renderModelMix(withModels(9), "codex", "dark");
+  assert.match(mix, />Other \(4\)<\/text>/); // the mix names five models, so six rows in all
+  assert.doesNotMatch(mix, />model-6<\/text>/);
+  assert.equal((mix.match(/<rect x="\d+" y="\d+" width="9"/g) ?? []).length, 6);
+  assert.equal(modelRows(withModels(9), 5).length, 6);
+  // Sizes match what previews reserve, for every row count.
+  for (const count of [0, 1, 6, 9]) for (const style of ["classic", "compact"] as const) for (const kind of ["models", "ledger"] as const) {
+    const snapshot = withModels(count), svg = renderCard(snapshot, "codex", "dark", { kind, style });
+    const { width, height } = cardSize(kind, style, snapshot);
+    assert.match(svg, new RegExp(`^<svg[^>]* width="${width}" height="${height}"`), `${kind}/${style}/${count}`);
+  }
+});
+
+test("model names are escaped and the cards carry no disclaimer text", () => {
+  const snapshot = withModels(1);
+  snapshot.models[0].model = "a<b>&\"c";
+  for (const svg of [renderModelMix(snapshot, "codex", "light"), renderModelLedger(snapshot, "codex", "light")]) {
+    assert.ok(!svg.includes("a<b>"));
+    assert.match(svg, /a&lt;b&gt;&amp;&quot;c/);
+    assert.doesNotMatch(svg, /not verified|account lifetime|standard API rates|¹/);
+  }
+  assert.doesNotMatch(renderTrendChart(snapshot, "codex", "dark"), /not verified|account lifetime|dates in/);
+});
+
+test("the usage trend draws the chosen window and measure", () => {
+  const snapshot = sampleSnapshot("codex", Date.parse("2026-10-21T08:00:00Z"));
+  const total = (days: number) => snapshot.daily.filter((d) => d.date > new Date(Date.parse("2026-10-21") - days * 86_400_000).toISOString().slice(0, 10))
+    .reduce((sum, d) => sum + d.totalTokens, 0);
+  const compact = (n: number) => new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+  assert.match(renderTrendChart(snapshot, "codex", "dark"), new RegExp(`>${compact(total(90))} tokens · 90 days</text>`));
+  assert.match(renderTrendChart(snapshot, "codex", "dark", { days: 365 }), /· 12 months</);
+  assert.match(renderTrendChart(snapshot, "codex", "dark", { measure: "cost" }), />\$[\d.]+K? · 90 days</);
+  const noCost = { ...snapshot, availability: { tokens: true, cost: false, sessions: true, humanRequests: true, assistantRequests: false, cacheBreakdown: false } };
+  assert.match(renderTrendChart(noCost, "codex", "dark", { measure: "cost" }), />Unavailable</);
+  for (const style of ["classic", "compact"] as const) {
+    const { width, height } = cardSize("trend", style);
+    assert.match(renderTrendChart(snapshot, "codex", "dark", { style }), new RegExp(`^<svg[^>]* width="${width}" height="${height}"`));
+  }
+});
+
+test("new kinds are parsed from the card URL, validated and saved", () => {
+  const options = (query: string) => cardOptions(new URL(`https://vibe-check.example/api/card?${query}`));
+  assert.deepEqual([options("kind=trend").days, options("kind=trend").measure], [90, "tokens"]);
+  assert.deepEqual([options("kind=trend&days=365&measure=cost").days, options("kind=trend&days=365&measure=cost").measure], [365, "cost"]);
+  assert.equal(options("kind=ledger&style=compact").style, "compact");
+  for (const query of ["kind=trend&days=7", "kind=trend&measure=sessions", "kind=models&style=spotlight", "kind=pie"])
+    assert.throws(() => options(query), query);
+  const url = new URL(widgetEmbed("https://vibe-check.example", "all", "dark", { kind: "trend", days: 30, measure: "cost", accent: "mono" }).image);
+  assert.deepEqual(Object.fromEntries(url.searchParams), { kind: "trend", provider: "all", theme: "dark", days: "30", measure: "cost", accent: "mono" });
+  assert.equal(new URL(widgetEmbed("https://vibe-check.example", "codex", "dark", { kind: "trend", days: 90 }).image).searchParams.has("days"), false);
+  const blocks = sanitizeBlocks([
+    { id: "1", type: "trend", provider: "codex", theme: "auto", days: 30, measure: "cost", style: "compact" },
+    { id: "2", type: "trend", provider: "codex", theme: "auto", days: 7, measure: "x" },
+    { id: "3", type: "models", provider: "all", theme: "auto", style: "spotlight" },
+    { id: "4", type: "ledger", provider: "claude", theme: "dark", width: 400, row: "r" },
+  ]);
+  assert.deepEqual(blocks, [
+    { id: "1", type: "trend", provider: "codex", theme: "auto", style: "compact", days: 30, measure: "cost" },
+    { id: "2", type: "trend", provider: "codex", theme: "auto" },
+    { id: "3", type: "models", provider: "all", theme: "auto" },
+    { id: "4", type: "ledger", provider: "claude", theme: "dark", width: 400, row: "r" },
+  ]);
+  assert.match(serializeReadme(blocks.slice(3), "https://vibe-check.example").markdown, /kind=ledger&amp;provider=claude/);
+});
+
+// ───────── Usage by harness ─────────
+import { combineSnapshots } from "../lib/overview";
+import { harnessRows, renderHarnessShare } from "../lib/profile-card";
+
+test("the harness card splits All usage by harness, as a bar graph or a pie chart", () => {
+  const now = Date.parse("2026-10-21T08:00:00Z");
+  const all = combineSnapshots(["codex", "claude", "cursor"].map((p) => sampleSnapshot(p as "codex", now)))!;
+  const rows = harnessRows(all);
+  assert.deepEqual(rows.map((r) => r.provider).sort(), ["claude", "codex", "cursor"]);
+  assert.ok(rows[0].totalTokens >= rows[1].totalTokens && rows[1].totalTokens >= rows[2].totalTokens);
+  assert.equal(rows.reduce((sum, r) => sum + r.totalTokens, 0), all.totals.totalTokens);
+  const bar = renderHarnessShare(all, "all", "dark"), pie = renderHarnessShare(all, "all", "dark", { chart: "pie" });
+  for (const svg of [bar, pie]) for (const r of rows) assert.ok(svg.includes(`>${r.label}</text>`), r.label);
+  assert.equal((pie.match(/<path d="M/g) ?? []).length, 3); // one slice per harness
+  assert.doesNotMatch(bar, /<path/);
+  for (const chart of ["bar", "pie"] as const) {
+    const { width, height } = cardSize("harnesses", "classic", all, chart);
+    assert.match(renderCard(all, "all", "light", { kind: "harnesses", chart }), new RegExp(`^<svg[^>]* width="${width}" height="${height}"`));
+  }
+  // A lone harness is a full circle, and a single harness's own snapshot has nothing to split.
+  assert.match(renderHarnessShare(combineSnapshots([sampleSnapshot("claude", now)])!, "all", "dark", { chart: "pie" }), /<circle /);
+  assert.match(renderHarnessShare(sampleSnapshot("claude", now), "all", "dark"), />No harness usage recorded</);
+});
+
+test("harness cards are All-only, keep their chart in the URL and survive saving", () => {
+  const options = (query: string) => cardOptions(new URL(`https://vibe-check.example/api/card?${query}`));
+  assert.equal(options("kind=harnesses").chart, "bar");
+  assert.equal(options("kind=harnesses&chart=pie").chart, "pie");
+  for (const query of ["kind=harnesses&chart=donut", "kind=harnesses&style=compact", "kind=harnesses&chart=pie&chart=bar"])
+    assert.throws(() => options(query), query);
+  const pie = new URL(widgetEmbed("https://vibe-check.example", "all", "dark", { kind: "harnesses", chart: "pie" }).image);
+  assert.deepEqual(Object.fromEntries(pie.searchParams), { kind: "harnesses", provider: "all", theme: "dark", chart: "pie" });
+  assert.equal(new URL(widgetEmbed("https://vibe-check.example", "all", "dark", { kind: "harnesses", chart: "bar" }).image).searchParams.has("chart"), false);
+  assert.deepEqual(sanitizeBlocks([
+    { id: "1", type: "harnesses", provider: "all", theme: "auto", chart: "pie" },
+    { id: "2", type: "harnesses", provider: "all", theme: "auto", chart: "donut", style: "compact" },
+    { id: "3", type: "harnesses", provider: "codex", theme: "auto" },
+  ]), [
+    { id: "1", type: "harnesses", provider: "all", theme: "auto", chart: "pie" },
+    { id: "2", type: "harnesses", provider: "all", theme: "auto" },
+  ]);
 });

@@ -13,7 +13,7 @@ test("cloud upload/read/widget roundtrip persists only sanitized aggregates and 
   // Mock the Upstash HTTP command boundary, not the app routes or validation.
   const env: Record<string, string | undefined> = process.env;
   const values = {
-    ATLAS_MODE: "cloud",
+    VIBE_CHECK_MODE: "cloud",
     SYNC_TOKEN: "cloud-fixture-private-token-1234567890",
     DASHBOARD_PASSWORD: "cloud-fixture-password",
     UPSTASH_REDIS_REST_URL: "https://storage.example",
@@ -49,7 +49,7 @@ test("cloud upload/read/widget roundtrip persists only sanitized aggregates and 
       return Response.json({ result: 1 });
     };
     const snapshot = await collectUsage(
-      path.join(tmpdir(), `missing-atlas-fixture-${randomUUID()}`),
+      path.join(tmpdir(), `missing-vibe-check-fixture-${randomUUID()}`),
     );
     const upload = (value: unknown, authorized = true) =>
       new Request("https://dashboard.example/api/ingest", {
@@ -84,7 +84,7 @@ test("cloud upload/read/widget roundtrip persists only sanitized aggregates and 
     const read = () =>
       new Request("https://dashboard.example/api/usage", {
         headers: {
-          cookie: `atlas_session=${sessionToken(values.DASHBOARD_PASSWORD)}`,
+          cookie: `vibe_check_session=${sessionToken(values.DASHBOARD_PASSWORD)}`,
         },
       });
     assert.equal(

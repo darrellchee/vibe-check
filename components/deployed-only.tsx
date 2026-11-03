@@ -1,12 +1,15 @@
 "use client";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ExternalLink } from "lucide-react";
+import { ArrowRight, ExternalLink } from "lucide-react";
+import { chooseLocalDashboard } from "@/lib/local-dashboard";
 import s from "./setup.module.css";
 
-// Shown instead of the dashboard on a local copy that is linked to a deployed site.
-export default function DeployedOnly({ site }: { site: string }) {
+// The first page a local copy linked to a deployed site shows. "Visit dashboard" reveals the local
+// dashboard (`children`) and remembers that choice for the rest of the browser session.
+export default function DeployedOnly({ site, children }: { site: string; children: ReactNode }) {
   const router = useRouter();
+  const [showDashboard, setShowDashboard] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -26,14 +29,21 @@ export default function DeployedOnly({ site }: { site: string }) {
     }
   }
 
+  if (showDashboard) return children;
+
   return (
     <main className={s.page}>
       <section className={s.body}>
         <h1 className={s.title}>You can only view your project in the deployed version</h1>
         <p className={s.lead}>This computer uploads your usage to {host}. Open it there to see your dashboard.</p>
-        <a className={s.primary} href={site}>
-          Open deployed version <ExternalLink size={16} />
-        </a>
+        <div className={s.stack}>
+          <a className={s.primary} href={site}>
+            Open deployed version <ExternalLink size={16} />
+          </a>
+          <button className={s.secondary} onClick={() => { chooseLocalDashboard(); setShowDashboard(true); }}>
+            Visit dashboard <ArrowRight size={16} />
+          </button>
+        </div>
         {confirming ? (
           <div className={s.confirm} role="group" aria-label="Unlink this computer">
             <p className={s.hint}>This stops uploading usage from this computer to {host}. Usage already uploaded stays there.</p>

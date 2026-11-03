@@ -141,7 +141,7 @@ test("collector-produced nonempty history is a valid upload with normalized sour
   const { tmpdir } = await import("node:os");
   const path = await import("node:path");
   const { collectUsage } = await import("../lib/collector");
-  const home = await mkdtemp(path.join(tmpdir(), "atlas-payload-qa-"));
+  const home = await mkdtemp(path.join(tmpdir(), "vibe-check-payload-qa-"));
   try {
     await mkdir(path.join(home, "sessions"));
     const rows = [

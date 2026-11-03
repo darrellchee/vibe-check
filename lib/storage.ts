@@ -1,60 +1,28 @@
 import { readFile, mkdir, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
 import type { UsageProvider, UsageSnapshot } from "./types";
-const storageKey = (provider: UsageProvider) => `${provider}-atlas:snapshot:v1`;
+import { kv, storageBackend } from "./kv";
+import { isCloud } from "./mode";
+const storageKey = (provider: UsageProvider) => `${provider}-vibe-check:snapshot:v1`;
+// Sites deployed before the rename stored snapshots here. It is read until the first new upload.
+const legacyStorageKey = (provider: UsageProvider) => `${provider}-atlas:snapshot:v1`;
 const snapshotFile = (provider: UsageProvider) =>
   provider === "codex" ? "snapshot.json" : `${provider}-snapshot.json`;
-function config() {
-  // Vercel's Upstash integration injects KV_REST_API_*; self-managed setups use UPSTASH_REDIS_REST_*.
-  const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL,
-    token =
-      process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
-  if (Boolean(url) !== Boolean(token))
-    throw new Error("Both Upstash environment variables are required.");
-  if (url && !url.startsWith("https://"))
-    throw new Error("Cloud storage requires HTTPS.");
-  return url && token ? { url, token } : null;
-}
+// A database is connected when one integration's variables are fully set. See lib/kv.ts.
 export function storageConfigured() {
   try {
-    return config() !== null;
+    return storageBackend() !== null;
   } catch {
     return false;
   }
 }
-export function isCloud() {
-  const mode = process.env.ATLAS_MODE;
-  if (mode === "cloud") return true;
-  if (mode === "local") return false;
-  // Vercel sets VERCEL=1 at runtime, so a deployed copy needs no mode setting.
-  return process.env.VERCEL === "1";
-}
-export async function redis(command: unknown[]) {
-  const c = config();
-  if (!c)
-    throw new Error(
-      "Cloud storage is not configured. Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.",
-    );
-  const response = await fetch(c.url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${c.token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(command),
-    cache: "no-store",
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) throw new Error("Cloud storage is unavailable.");
-  const result = await response.json();
-  if (result.error) throw new Error("Cloud storage rejected the operation.");
-  return result.result;
-}
+// Kept in its own dependency-free module so the startup hook can check it cheaply.
+export { isCloud } from "./mode";
 export async function readSnapshot(
   provider: UsageProvider = "codex",
 ): Promise<UsageSnapshot | null> {
   if (isCloud()) {
-    const value = await redis(["GET", storageKey(provider)]);
+    const value = (await kv().get(storageKey(provider))) ?? (await kv().get(legacyStorageKey(provider)));
     return value ? JSON.parse(value) : null;
   }
   try {
@@ -72,18 +40,8 @@ export async function readSnapshot(
 export async function saveSnapshot(snapshot: UsageSnapshot) {
   const provider = snapshot.provider || "codex";
   if (isCloud()) {
-    // Compare and replace atomically so slow collectors cannot overwrite newer data.
-    const script =
-      "local old = redis.call('GET', KEYS[1]); if old then local parsed = cjson.decode(old); if parsed.generatedAt >= ARGV[1] then return 0 end end; redis.call('SET', KEYS[1], ARGV[2]); return 1";
-    const saved = await redis([
-      "EVAL",
-      script,
-      1,
-      storageKey(provider),
-      snapshot.generatedAt,
-      JSON.stringify(snapshot),
-    ]);
-    return saved === 1;
+    // Atomic compare-and-replace, so slow collectors cannot overwrite newer data.
+    return kv().putIfNewer(storageKey(provider), snapshot.generatedAt, JSON.stringify(snapshot));
   }
   const dir = path.join(process.cwd(), "data");
   await mkdir(dir, { recursive: true });

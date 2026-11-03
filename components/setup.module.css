@@ -164,6 +164,54 @@
   word-break: break-all;
 }
 
+/* The database picker on the deploy step: one row per provider, the chosen one outlined. */
+.choices {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.choices > legend { margin-bottom: 8px; padding: 0; }
+.choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.choice:hover { background: var(--soft); }
+.choice:has(input:checked) { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.choice:has(input:focus-visible) { outline: 2px solid #2563eb; outline-offset: 2px; }
+.choice > input { grid-row: span 2; margin: 0; accent-color: var(--ink); }
+.choiceName { font-size: 16px; font-weight: 600; }
+.choiceNote { font-size: 14px; color: var(--muted); }
+
+.providers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Two stacked buttons of equal width: the main action, then the alternative under it. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(100%, 320px);
+}
+.stack > .primary,
+.stack > .secondary {
+  width: 100%;
+  min-height: 52px;
+  font-size: 16px;
+}
+
 .confirm {
   width: 100%;
   display: flex;

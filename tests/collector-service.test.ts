@@ -8,13 +8,13 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 
 const config = {
-  root: '/work/Atlas & "profile"', home: "/home/developer", node: "/usr/local/bin/node",
+  root: '/work/Vibe Check & "profile"', home: "/home/developer", node: "/usr/local/bin/node",
   loader: "file:///work/node_modules/tsx/dist/loader.mjs", provider: "all",
 };
 test("macOS collector uses escaped absolute paths, restarts and contains no credentials", () => {
   const service = collectorService({ ...config, platform: "darwin" });
-  assert.match(service.file, /Library\/LaunchAgents\/dev.codex-atlas.collector.plist$/);
-  assert.match(service.content, /Atlas &amp; &quot;profile&quot;/);
+  assert.match(service.file, /Library\/LaunchAgents\/dev.vibe-check.collector.plist$/);
+  assert.match(service.content, /Vibe Check &amp; &quot;profile&quot;/);
   assert.match(service.content, /<key>KeepAlive<\/key><true\/>/);
   assert.match(service.content, /<string>--watch<\/string>/);
   assert.equal(service.content.includes("SYNC_TOKEN"), false);
@@ -22,7 +22,7 @@ test("macOS collector uses escaped absolute paths, restarts and contains no cred
 });
 test("Linux collector quotes command paths and escapes systemd expansion", () => {
   const service = collectorService({ ...config, root: '/work/100% "stats" $USER', platform: "linux" });
-  assert.match(service.file, /\.config\/systemd\/user\/dev.codex-atlas.collector.service$/);
+  assert.match(service.file, /\.config\/systemd\/user\/dev.vibe-check.collector.service$/);
   assert.match(service.content, /100%%/);
   assert.match(service.content, /\$\$USER/);
   assert.match(service.content, /Restart=always/);
@@ -37,7 +37,7 @@ test("service configs reject control characters and unknown providers", () => {
 
 test("installer installs, reinstalls and removes in an isolated home without embedding the secret", async () => {
   if (process.platform !== "darwin" && process.platform !== "linux") return;
-  const temp = await mkdtemp(path.join(tmpdir(), "atlas-service-"));
+  const temp = await mkdtemp(path.join(tmpdir(), "vibe-check-service-"));
   const root = path.join(temp, "repo with spaces"), home = path.join(temp, "home"), bin = path.join(temp, "bin");
   const secret = "service-fixture-secret-12345678901234567890";
   try {
@@ -56,7 +56,7 @@ test("installer installs, reinstalls and removes in an isolated home without emb
     });
     assert.equal(run("install").status, 1, "must reject missing credentials before service-manager calls");
     const envFile = path.join(root, ".env.local");
-    await writeFile(envFile, `SYNC_URL=https://atlas.example\nSYNC_TOKEN=${secret}\n`);
+    await writeFile(envFile, `SYNC_URL=https://vibe-check.example\nSYNC_TOKEN=${secret}\n`);
     const installed = run("install", "--provider", "all");
     assert.equal(installed.status, 0, installed.stderr);
     const service = collectorService({ ...config, root, home, platform: process.platform });

@@ -1,27 +1,17 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity,
   ArrowDownToLine,
   ArrowRight,
   ArrowUpRight,
-  BarChart3,
   Check,
   ChevronDown,
-  Clock3,
-  Code2,
-  Database,
   ExternalLink,
-  Fingerprint,
   Info,
-  Layers3,
   LoaderCircle,
   LockKeyhole,
   RefreshCw,
-  Sparkles,
-  Terminal,
   X,
-  Zap,
 } from "lucide-react";
 import {
   Area,
@@ -38,23 +28,13 @@ import {
   Bar,
 } from "recharts";
 import Link from "next/link";
-import ProviderNavigation from "./provider-navigation";
 import { useRouter } from "next/navigation";
-import type { UsageProvider, UsageSnapshot } from "@/lib/types";
-const COLORS = [
-  "#a3e635",
-  "#a78bfa",
-  "#38bdf8",
-  "#fb923c",
-  "#f472b6",
-  "#2dd4bf",
-  "#facc15",
-  "#818cf8",
-  "#fb7185",
-  "#c4b5fd",
-  "#67e8f9",
-  "#e5c07b",
-];
+import type { CardProvider, MetricAvailability, UsageProvider, UsageSnapshot } from "@/lib/types";
+import { PROVIDERS, providerName } from "@/lib/providers";
+import { biggestWindow, hasHistory, loadHarnesses, mergeHarnesses, metricAvailable, summarizeHarnesses } from "@/lib/overview";
+import type { HarnessUsage } from "@/lib/overview";
+import { modelLabel } from "@/lib/model-label";
+import { ACCENT, CountUp, GRID, Headline, HoverTip, OTHER, PanelTitle, SERIES, TopNav, axisTick, nearestSegment, tooltipStyle, useHoverTip, useReveal } from "./vibe-check-chrome";
 const compact = (n: number) =>
   new Intl.NumberFormat("en-US", {
     notation: "compact",
@@ -73,20 +53,7 @@ const dateLabel = (s: string) =>
     day: "numeric",
     timeZone: "UTC",
   });
-const modelLabel = (s: string) => {
-  const claude = s.match(
-    /^claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/,
-  );
-  if (claude)
-    return `Claude ${claude[1][0].toUpperCase()}${claude[1].slice(1)} ${claude[2]}${claude[3] ? "." + claude[3] : ""}`;
-  return s
-    .replace(/^gpt-/, "GPT-")
-    .replace(/-codex/g, " Codex")
-    .replace(
-      /-(sol|astra|luna|terra)/g,
-      (_, x: string) => ` ${x[0].toUpperCase()}${x.slice(1)}`,
-    );
-};
+const DONUT_MIN_ANGLE = 1;
 const shareText = (value: number, total: number) => {
   const share = total ? (value / total) * 100 : 0;
   return share > 0 && share < 0.1 ? "<0.1%" : `${share.toFixed(1)}%`;
@@ -98,22 +65,6 @@ const dayInZone = (timestamp: string, timezone: string) =>
     month: "2-digit",
     day: "2-digit",
   }).format(new Date(timestamp));
-const recordedDate = (timestamp: string, timezone: string) =>
-  new Date(timestamp).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: timezone,
-  });
-const modelColor = (i: number) =>
-  COLORS[i] || `hsl(${(i * 137.508) % 360} 65% 66%)`;
-const tooltipStyle = {
-  background: "#202322",
-  border: "1px solid #3a3e37",
-  borderRadius: 10,
-  color: "#f1f1ed",
-  fontSize: 12,
-};
 const ALL_AVAILABLE = {
   tokens: true,
   cost: true,
@@ -123,18 +74,67 @@ const ALL_AVAILABLE = {
   cacheBreakdown: true,
 };
 type Range = "All time" | "Last 30 days" | "Last 7 days";
+// On the All page each harness keeps its own colour slot, so its colour never changes when others are missing.
+const HARNESS_COLORS = Object.fromEntries(PROVIDERS.map((p, i) => [p, SERIES[i]])) as Record<UsageProvider, string>;
+const harnessHref = (p: UsageProvider) => (p === "codex" ? "/" : `/${p}`);
+
+// Hover card for the stacked All trend. Recharts' default colours each row with the series stroke,
+// which is white here (the divider between layers), so the numbers would be invisible.
+function HarnessTooltip({ active, payload, label, metric }: {
+  active?: boolean;
+  payload?: ReadonlyArray<{ payload?: Record<string, number | string> }>;
+  label?: string | number;
+  metric: "tokens" | "cost";
+}) {
+  const day = payload?.[0]?.payload;
+  if (!active || !day) return null;
+  const amount = (p: UsageProvider) => Number(day[`${p}_${metric}`] ?? 0);
+  const format = (v: number) => (metric === "tokens" ? number(v) : money(v));
+  const rows = PROVIDERS.filter((p) => amount(p) > 0);
+  const total = rows.reduce((sum, p) => sum + amount(p), 0);
+  const date = new Date(`${label}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  return (
+    <div className="daily-tooltip" style={tooltipStyle}>
+      <p className="daily-tooltip-date">{date}</p>
+      {rows.length === 0 ? <p className="daily-tooltip-empty">No recorded {metric === "tokens" ? "tokens" : "value"}</p> : (
+        <ul>
+          {rows.map((p) => (
+            <li key={p}>
+              <span className="swatch" style={{ background: HARNESS_COLORS[p] }} />
+              <span>{providerName(p)}</span>
+              <strong>{format(amount(p))}</strong>
+            </li>
+          ))}
+          {rows.length > 1 && <li className="daily-tooltip-total"><span /><span>Total</span><strong>{format(total)}</strong></li>}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard({
   provider = "codex",
+  initial,
+  initialHarnesses,
+  initialStale = false,
 }: {
-  provider?: UsageProvider;
+  // "all" draws every harness at once from a merged snapshot.
+  provider?: CardProvider;
+  // Usage the server already had, so the page arrives filled in. Missing: load it here.
+  initial?: UsageSnapshot;
+  initialHarnesses?: HarnessUsage[];
+  initialStale?: boolean;
 }) {
-  const isClaude = provider === "claude",
+  const isAll = provider === "all",
+    isClaude = provider === "claude",
     isCursor = provider === "cursor",
     isAntigravity = provider === "antigravity",
     // Imported or retained history can end well before today, so ranges and
     // the calendar anchor to the last recorded event instead of the wall clock.
     anchorToLastEvent = isCursor || isAntigravity,
-    product = isClaude
+    product = isAll
+      ? "connected harnesses"
+      : isClaude
       ? "Claude Code"
       : isCursor
         ? "Cursor"
@@ -142,51 +142,71 @@ export default function Dashboard({
           ? "Antigravity"
           : "Codex",
     brand = provider,
-    accent = isClaude
-      ? "#e8a67b"
-      : isCursor
-        ? "#8ac5f7"
-        : isAntigravity
-          ? "#aa8af7"
-          : "#a3e635";
-  const colorFor = (i: number) =>
-    (isClaude || isCursor || isAntigravity) && i === 0
-      ? accent
-      : // Palette slot 1 is a near twin of the violet accent, so skip it.
-        modelColor(isAntigravity ? i + 1 : i);
+    accent = ACCENT;
 
   const router = useRouter();
+  const shellRef = useRef<HTMLDivElement>(null);
   const heatmapRef = useRef<HTMLDivElement>(null);
-  const [data, setData] = useState<UsageSnapshot | null>(null),
+  useReveal(shellRef);
+  const [single, setData] = useState<UsageSnapshot | null>(initial ?? null),
+    // All only: each harness's own result, merged into `data` below.
+    [harnesses, setHarnesses] = useState<HarnessUsage[] | null>(initialHarnesses ?? null),
+    // All only: the harness being pointed at, in the share bar or its table row.
+    [harnessOn, setHarnessOn] = useState<UsageProvider | null>(null),
+    [stale, setStale] = useState(initialStale),
     [error, setError] = useState(""),
     [locked, setLocked] = useState(false),
     [password, setPassword] = useState(""),
     [busy, setBusy] = useState(false),
     [range, setRange] = useState<Range>("All time"),
-    [tab, setTab] = useState("Overview"),
     [info, setInfo] = useState(false),
     [metricChoice, setMetric] = useState<"tokens" | "cost">("tokens"),
-    [lastChecked, setLastChecked] = useState(""),
-    [checkedAt, setCheckedAt] = useState(0),
-    [year, setYear] = useState<number | null>(null);
+    [year, setYear] = useState<number | null>(null),
+    // Hover highlights: a model in the mix bar, a slice of the donut.
+    [mixOn, setMixOn] = useState<string | null>(null),
+    [hoodOn, setHoodOn] = useState<number | null>(null);
+  const tip = useHoverTip();
+  const data = useMemo(
+    () => (isAll ? (harnesses ? mergeHarnesses(harnesses) : null) : single),
+    [isAll, harnesses, single],
+  );
+  const overview = useMemo(() => summarizeHarnesses(harnesses ?? []), [harnesses]);
+  const failures = isAll ? (harnesses ?? []).filter((h) => h.error) : [];
   const availability = data?.availability ?? ALL_AVAILABLE;
   const metric =
     metricChoice === "cost" && !availability.cost ? "tokens" : metricChoice;
   const refresh = useCallback(async () => {
     setBusy(true);
+    // A brand-new deployment has no password yet: send its first visitor to setup.
+    const toSetupIfUnclaimed = () =>
+      void fetch("/api/setup/status", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((s) => {
+          if (s?.cloud && s.storage === "ok" && !s.claimed) router.push("/setup");
+        })
+        .catch(() => {});
     try {
+      if (provider === "all") {
+        // Each harness loads on its own; a failed one is reported, not fatal.
+        const result = await loadHarnesses();
+        if (result.locked) {
+          setLocked(true);
+          setHarnesses(null);
+          toSetupIfUnclaimed();
+          return;
+        }
+        setHarnesses(result.harnesses);
+        setStale(result.stale);
+        setLocked(false);
+        setError("");
+        return;
+      }
       const response = await fetch(`/api/usage?provider=${provider}`, {
         cache: "no-store",
       });
       if (response.status === 401) {
         setLocked(true);
-        // A brand-new deployment has no password yet: send its first visitor to setup.
-        void fetch("/api/setup/status", { cache: "no-store" })
-          .then((r) => r.json())
-          .then((s) => {
-            if (s?.cloud && s.storage === "ok" && !s.claimed) router.push("/setup");
-          })
-          .catch(() => {});
+        toSetupIfUnclaimed();
         return;
       }
       const body = await response.json();
@@ -196,30 +216,27 @@ export default function Dashboard({
           "Received usage for a different product. Try refreshing.",
         );
       setData(body);
-      setCheckedAt(Date.now());
+      setStale(response.headers.get("X-Usage-Stale") === "1");
       setLocked(false);
       setError("");
-      setLastChecked(
-        new Date().toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        }),
-      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not connect.");
     } finally {
       setBusy(false);
     }
   }, [provider, router]);
+  const loadedOnServer = useRef(Boolean(initial || initialHarnesses));
   useEffect(() => {
-    const initial = setTimeout(() => void refresh(), 0);
-    const id = setInterval(() => void refresh(), 15_000);
-    return () => {
-      clearTimeout(initial);
-      clearInterval(id);
-    };
+    if (loadedOnServer.current) return;
+    const first = setTimeout(() => void refresh(), 0);
+    return () => clearTimeout(first);
   }, [refresh]);
+  // A stale snapshot was saved by an earlier run while this one re-reads history: check back
+  // often so the fresh numbers replace it as soon as they are ready.
+  useEffect(() => {
+    const id = setInterval(() => void refresh(), stale ? 2_000 : 15_000);
+    return () => clearInterval(id);
+  }, [refresh, stale]);
   const filtered = useMemo(() => {
     if (!data) return [];
     const end = new Date(
@@ -288,7 +305,7 @@ export default function Dashboard({
       : null);
   useEffect(() => {
     const el = heatmapRef.current;
-    if (el && window.innerWidth < 640) el.scrollLeft = el.scrollWidth;
+    if (el && window.innerWidth < 768) el.scrollLeft = el.scrollWidth;
   }, [calendarYear]);
   useEffect(() => {
     if (!info) return;
@@ -335,11 +352,11 @@ export default function Dashboard({
   function download() {
     if (!data) return;
     const url = URL.createObjectURL(
-      new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
+      new Blob([JSON.stringify(isAll ? { harnesses } : data, null, 2)], { type: "application/json" }),
     );
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${brand}-atlas-${data.generatedAt.slice(0, 10)}.json`;
+    a.download = `${brand}-vibe-check-${data.generatedAt.slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -352,6 +369,21 @@ export default function Dashboard({
       1,
       ...activity.map((d) => (byRequests ? d.requests : d.tokens)),
     );
+  // Eight colour slots, never cycled. With more models than slots, the first seven keep a
+  // colour and the rest share one "Other" segment in the bar.
+  const folds = models.length > SERIES.length;
+  const colorFor = (i: number) => (folds && i >= SERIES.length - 1 ? OTHER : SERIES[i]);
+  const segments = folds
+    ? [
+        ...models.slice(0, SERIES.length - 1).map((m, i) => ({ key: m.model, label: modelLabel(m.model), tokens: m.totalTokens, color: colorFor(i) })),
+        {
+          key: "other",
+          label: `Other models (${models.length - SERIES.length + 1})`,
+          tokens: models.slice(SERIES.length - 1).reduce((sum, m) => sum + m.totalTokens, 0),
+          color: OTHER,
+        },
+      ]
+    : models.map((m, i) => ({ key: m.model, label: modelLabel(m.model), tokens: m.totalTokens, color: colorFor(i) }));
   // Tokens only exist for exported days, so divide by the sessions on those
   // same days rather than the whole retained history.
   const matchedTokens = (data?.daily || []).filter((d) => d.totalTokens > 0),
@@ -360,8 +392,25 @@ export default function Dashboard({
       ? matchedTokens.reduce((sum, d) => sum + d.totalTokens, 0) /
         matchedSessions
       : 0;
+  // All only: each harness's tokens and value per day, keyed `${harness}_${metric}` for the stacked trend.
+  const harnessDaily = useMemo(() => {
+    const days = new Map<string, Record<string, number>>();
+    for (const { provider: p, snapshot } of isAll ? overview.connected : []) {
+      const tokens = metricAvailable(snapshot, "tokens"), cost = metricAvailable(snapshot, "cost");
+      for (const d of snapshot.daily) {
+        const row = days.get(d.date) ?? {};
+        if (tokens) row[`${p}_tokens`] = (row[`${p}_tokens`] ?? 0) + d.totalTokens;
+        if (cost) row[`${p}_cost`] = (row[`${p}_cost`] ?? 0) + d.costUsd;
+        days.set(d.date, row);
+      }
+    }
+    return days;
+  }, [isAll, overview]);
   const chart = useMemo(() => {
     if (!data) return [];
+    const zero: Record<string, number> = isAll
+      ? Object.fromEntries(PROVIDERS.flatMap((p) => [[`${p}_tokens`, 0], [`${p}_cost`, 0]]))
+      : {};
     const end = new Intl.DateTimeFormat("en-CA", {
       timeZone: data.timezone,
       year: "numeric",
@@ -403,24 +452,26 @@ export default function Dashboard({
       const key = new Date(t).toISOString().slice(0, 10),
         d = byDay.get(key);
       result.push({
+        ...zero,
+        ...harnessDaily.get(key),
         date: key,
         tokens: d?.totalTokens || 0,
         cost: d?.costUsd || 0,
       });
     }
     return result;
-  }, [data, filtered, range, anchorToLastEvent]);
+  }, [data, filtered, range, anchorToLastEvent, isAll, harnessDaily]);
   const inputBreakdown = totals
     ? [
         {
           name: "Cached input",
           value: totals.cachedInputTokens,
-          color: accent,
+          color: SERIES[0],
         },
         {
           name: "Cache writes",
           value: totals.cacheWriteTokens,
-          color: "#fb923c",
+          color: SERIES[1],
         },
         {
           name: "Fresh input",
@@ -428,984 +479,987 @@ export default function Dashboard({
             totals.inputTokens -
             totals.cachedInputTokens -
             totals.cacheWriteTokens,
-          color: isAntigravity ? "#2dd4bf" : "#a78bfa",
+          color: SERIES[2],
         },
-        { name: "Output", value: totals.outputTokens, color: "#38bdf8" },
+        { name: "Output", value: totals.outputTokens, color: SERIES[3] },
       ].filter((d) => d.value > 0)
     : [];
+  const activeDays = data
+    ? data.daily.filter(
+        (d) =>
+          (d.totalTokens > 0 || (byRequests && d.humanRequests > 0)) &&
+          d.date.startsWith(String(calendarYear)),
+      ).length
+    : 0;
+  const hovered = hoodOn === null ? undefined : inputBreakdown[hoodOn];
+  const showDay = (target: Element) => {
+    const cell = target.closest<HTMLElement>("[data-i]");
+    const d = cell && activity[Number(cell.dataset.i)];
+    if (!cell || !d) return;
+    tip.show(cell, (
+      <>
+        <div className="tip-title">
+          {new Date(`${d.date}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}
+        </div>
+        {d.future ? <div className="tip-row">Still to come</div> : <>
+          <div className="tip-row"><strong>{number(d.tokens)}</strong> tokens</div>
+          {availability.humanRequests && <div className="tip-row"><strong>{number(d.requests)}</strong> human requests</div>}
+        </>}
+      </>
+    ));
+  };
+  const powerValue = !data || !availability.cost
+    ? "Unavailable"
+    : data.mostExpensive24h
+      ? money(data.mostExpensive24h.costUsd)
+      : "—";
+  // All only: which harness the power session comes from.
+  const power = isAll ? biggestWindow(harnesses ?? []) : null;
+  // All only: harnesses with a token share, in the same order as the share bar's segments.
+  const shares = overview.connected
+    .filter(({ snapshot }) => metricAvailable(snapshot, "tokens"))
+    .map(({ provider: p, snapshot }) => ({ provider: p, tokens: snapshot.totals.totalTokens }));
+  const harnessCount = overview.connected.length;
   return (
-    <div className={`shell ${isClaude ? "claude" : isCursor ? "cursor" : isAntigravity ? "antigravity" : ""}`}>
-      <aside className="sidebar">
-        <Link
-          className="brand"
-          href={isClaude ? "/claude" : isCursor ? "/cursor" : isAntigravity ? "/antigravity" : "/"}
-          aria-label={`${product} Atlas home`}
-        >
-          <span className="brand-icon">
-            <Terminal size={22} />
-          </span>
-          <span>
-            {brand}
-            <span className="brand-light">atlas</span>
-            <small>YOUR PERSONAL OBSERVATORY</small>
-          </span>
-        </Link>
-        <div className="workspace">
-          <div className="avatar">D</div>
+    <div className="shell" ref={shellRef}>
+      <TopNav selected={provider} home={provider === "codex" ? "/" : `/${provider}`} name={brand} />
+      <main id="overview">
+        <header className="dash-head">
           <div>
-            Personal workspace
-            <small>
-              {isClaude ? "Claude Code" : isCursor ? "Cursor" : isAntigravity ? "Antigravity" : "Codex Pro"}{" "}
-              <span>PERSONAL</span>
-            </small>
+            {isAll
+              ? <Headline text="All your work, together." accent="together." />
+              : <Headline text={`Your ${product} Usage`} accent={product} />}
           </div>
-          <ChevronDown size={13} />
-        </div>
-        <div className="nav-label">WORKSPACE</div>
-        <nav>
-          {[
-            { name: "Overview", icon: Layers3 },
-            { name: "Activity", icon: Activity },
-            { name: "Models", icon: Sparkles },
-          ].map(({ name, icon: Icon }) => (
-            <button
-              key={name}
-              className={tab === name ? "active" : ""}
-              onClick={() => {
-                setTab(name);
-                document
-                  .getElementById(
-                    name === "Activity"
-                      ? "activity"
-                      : name === "Models"
-                        ? "models"
-                        : "overview",
-                  )
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
-              }}
-            >
-              <Icon size={17} />
-              {name}
-              {tab === name && <span className="nav-dot" />}
+          <div className="dash-actions" data-reveal>
+            <nav className="section-index" aria-label="Sections">
+              <a href="#overview">Overview</a>
+              {isAll && <a href="#harnesses">Harnesses</a>}
+              <a href="#models">Models</a>
+              <a href="#activity">Activity</a>
+            </nav>
+            <button className="pill pill-accent pill-sm" onClick={download} disabled={!data}>
+              <ArrowDownToLine size={14} /> Export data
             </button>
-          ))}
-        </nav>
-        <div className="sidebar-note">
-          <div className="note-icon">
-            <Fingerprint size={19} />
-          </div>
-          <strong>Your data. Your perspective.</strong>
-          <p>Usage numbers only. Your conversations stay with you.</p>
-          <button onClick={() => setInfo(true)}>
-            How it works <ArrowUpRight size={13} />
-          </button>
-        </div>
-        <button className="sidebar-bottom" onClick={() => setInfo(true)}>
-          <Code2 size={17} />
-          <span>
-            Built for the curious<small>{product} Atlas v0.2</small>
-          </span>
-          <ArrowUpRight size={14} />
-        </button>
-      </aside>
-      <div className="main-wrap">
-        <header className="topbar">
-          <div>
-            <span className="breadcrumb">Workspace</span>
-            <span className="slash">/</span>
-            {tab}
-          </div>
-          <div className="topbar-right">
-            <ProviderNavigation selected={provider} />
-            <span className="plan-badge">
-              <Zap size={12} />{" "}
-              {isClaude ? "CLAUDE CODE" : isCursor ? "CURSOR" : isAntigravity ? "ANTIGRAVITY" : "PERSONAL PRO"}
-            </span>
-            <div className="avatar small">D</div>
+            <button
+              className="round round-sm"
+              aria-label="Refresh usage"
+              onClick={() => void refresh()}
+              disabled={busy}
+            >
+              <RefreshCw size={14} className={busy ? "spin" : ""} />
+            </button>
           </div>
         </header>
-        <main id="overview">
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">
-                <span /> THE BIG PICTURE
-              </div>
-              <h1>
-                Your work, in perspective<span>.</span>
-              </h1>
-              <p>
-                {`A little curiosity. A lot of tokens. Here’s your ${product} story.`}
+        {locked ? (
+          <section className="notice-block login">
+            <LockKeyhole size={24} />
+            <h2 className="display-s">Your observatory is private.</h2>
+            <p>Enter the dashboard password to see your usage.</p>
+            <form onSubmit={login}>
+              <input
+                type="password"
+                autoComplete="current-password"
+                aria-label="Dashboard password"
+                placeholder="Dashboard password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <button className="pill pill-filled" disabled={busy}>
+                Unlock <ArrowRight size={16} />
+              </button>
+            </form>
+            {error && (
+              <p role="alert" className="error">
+                {error}
               </p>
-            </div>
-            <div className="heading-actions">
-              <Link
-                className="button"
-                href="/setup"
-                aria-label="Put your usage on your GitHub profile"
-              >
-                <Code2 size={14} /> Put on GitHub
-              </Link>
-              <button
-                className="icon-button"
-                aria-label="Refresh usage"
-                onClick={() => void refresh()}
-                disabled={busy}
-              >
-                <RefreshCw size={16} className={busy ? "spin" : ""} />
-              </button>
-              <button className="button" onClick={download} disabled={!data}>
-                <ArrowDownToLine size={14} /> Export data
-              </button>
-            </div>
-          </div>
-          {locked ? (
-            <section className="panel login">
-              <LockKeyhole size={28} />
-              <h2>Your observatory is private.</h2>
-              <p>Enter the dashboard password to see your usage.</p>
-              <form onSubmit={login}>
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  aria-label="Dashboard password"
-                  placeholder="Dashboard password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-                <button className="button primary" disabled={busy}>
-                  Unlock <ArrowRight size={15} />
-                </button>
-              </form>
-              {error && (
-                <p role="alert" className="error">
+            )}
+          </section>
+        ) : (
+          <>
+            {error && (
+              <div role="alert" className="error-banner">
+                <Info size={16} />
+                <span>
                   {error}
+                  {data ? " Showing the last successful update." : ""}
+                </span>
+                <button className="text-link" onClick={() => void refresh()}>Try again</button>
+              </div>
+            )}
+            {failures.length > 0 && (
+              <div role="alert" className="error-banner">
+                <Info size={16} />
+                <span>
+                  Partial overview: {failures.map((h) => providerName(h.provider)).join(", ")}{" "}
+                  could not be loaded and {failures.length === 1 ? "is" : "are"} excluded from totals.
+                </span>
+                <button className="text-link" onClick={() => void refresh()} disabled={busy}>Try again</button>
+              </div>
+            )}
+            {!data && !error ? (
+              <section className="notice-block loading">
+                <LoaderCircle className="spin" />
+                <h2 className="display-s">Reading your {product} history</h2>
+                <p>
+                  Counting tokens. Your conversations stay on this machine.
                 </p>
-              )}
-            </section>
-          ) : (
-            <>
-              {error && (
-                <div role="alert" className="error-banner">
-                  <Info size={16} />
-                  <span>
-                    {error}
-                    {data ? " Showing the last successful update." : ""}
-                  </span>
-                  <button onClick={() => void refresh()}>Try again</button>
-                </div>
-              )}
-              {!data && !error ? (
-                <section className="loading">
-                  <LoaderCircle className="spin" />
-                  <h2>Reading your {product} history</h2>
-                  <p>
-                    Counting tokens. Your conversations stay on this machine.
-                  </p>
-                </section>
-              ) : (
-                data &&
-                totals && (
-                  <>
-                    <div className="status-row">
-                      <span className="live">
-                        <span />{" "}
-                        {data.source === "local"
-                          ? isCursor && availability.tokens
-                            ? "CURSOR USAGE"
-                            : "LOCAL COLLECTOR"
-                          : "CLOUD SYNC"}
-                      </span>
-                      <span className="status-text">
-                        {data.coverage.firstEvent
-                          ? `Recorded ${recordedDate(data.coverage.firstEvent, data.timezone)} – ${recordedDate(data.coverage.lastEvent || data.generatedAt, data.timezone)}`
-                          : "No recorded history yet"}
-                      </span>
-                      <button
-                        className="text-button"
-                        onClick={() => setInfo(true)}
-                      >
-                        About this data <Info size={12} />
-                      </button>
-                      <span className="updated">
-                        {data.source === "cloud"
-                          ? `Collected ${new Date(data.generatedAt).toLocaleString()}${checkedAt - Date.parse(data.generatedAt) > 90_000 ? " · awaiting sync" : ""}`
-                          : `Checked ${lastChecked} · refreshes every 15s`}
-                      </span>
-                    </div>
-                    {isCursor && (
-                      <div className="coverage-notice">
-                        <Info size={15} />
-                        <span>
-                          {availability.tokens
-                            ? availability.sessions
-                              ? "Cursor tokens, models and cost come from your usage events (automatic account sync or imported exports); sessions and activity come from local history. Source details lists the covered dates."
-                              : "Cursor token graphs show imported usage exports. Add a fresh export, or enable CURSOR_AUTO_SYNC, to update account usage."
-                            : "No token export is loaded. Local activity may be shown, but token and cost graphs need a Cursor Usage events CSV."}{" "}
-                          <button
-                            className="text-button"
-                            onClick={() => setInfo(true)}
-                          >
-                            Source details <ArrowUpRight size={11} />
-                          </button>
-                        </span>
-                      </div>
-                    )}
-                    <section
-                      className="stats-grid"
-                      aria-label="Statistics across recorded history"
-                    >
-                      <Stat
-                        label="TOTAL TOKENS"
-                        value={
-                          availability.tokens
-                            ? compact(totals.totalTokens)
-                            : "Unavailable"
-                        }
-                        icon={<Layers3 size={16} />}
-                        detail={
-                          availability.tokens ? (
-                            <>
-                              <span className="mini-dot lime" />
-                              {compact(totals.inputTokens)} input{" "}
-                              <span className="mini-dot blue" />
-                              {compact(totals.outputTokens)} output
-                            </>
-                          ) : (
-                            "Not reported by local activity records"
-                          )
-                        }
-                        foot={
-                          isCursor
-                            ? "From your Cursor usage events"
-                            : "Across all recorded history"
-                        }
-                      />
-                      <Stat
-                        label="API-EQUIVALENT VALUE"
-                        value={
-                          availability.cost
-                            ? money(totals.costUsd)
-                            : "Unavailable"
-                        }
-                        icon={<Zap size={16} />}
-                        detail={
+              </section>
+            ) : (
+              data &&
+              totals && (
+                <>
+                  <section
+                    className="stats"
+                    aria-label="Statistics across recorded history"
+                    data-reveal="items"
+                  >
+                    <Stat
+                      index={1}
+                      label="Total tokens"
+                      value={
+                        availability.tokens
+                          ? compact(totals.totalTokens)
+                          : "Unavailable"
+                      }
+                      detail={
+                        availability.tokens ? (
                           <>
-                            <span className="estimate">ESTIMATE</span> USD ·
-                            current API rates
+                            {compact(totals.inputTokens)} input ·{" "}
+                            {compact(totals.outputTokens)} output
                           </>
-                        }
-                        foot={
-                          !availability.cost
-                            ? "Requires priced token records"
-                            : totals.unpricedTokens > 0
-                              ? `${compact(totals.unpricedTokens)} tokens have no cost estimate`
-                              : "Cache-aware · not your subscription bill"
-                        }
-                      />
-                      <Stat
-                        label="RECORDED SESSIONS"
-                        value={
-                          availability.sessions
-                            ? number(totals.sessions)
-                            : "Unavailable"
-                        }
-                        icon={<Terminal size={16} />}
-                        detail={
-                          availability.humanRequests ? (
-                            <>
-                              <span className="stat-accent">
-                                {number(totals.humanRequests)}
-                              </span>{" "}
-                              human requests
-                            </>
-                          ) : (
-                            isAntigravity ? "No Antigravity history found" : "Human requests not included in this source"
-                          )
-                        }
-                        foot={
-                          availability.assistantRequests
-                            ? `${number(totals.assistantRequests)} ${isCursor ? "usage events" : "model responses recorded"}`
-                            : "Model response count unavailable"
-                        }
-                      />
-                      <Stat
-                        label="AVG. TOKENS / SESSION"
-                        value={
-                          availability.tokens && availability.sessions
-                            ? byRequests
-                              ? matchedSessions
-                                ? compact(matchedAverage)
-                                : "Unavailable"
-                              : compact(totals.averageTokensPerSession)
-                            : "Unavailable"
-                        }
-                        icon={<BarChart3 size={16} />}
-                        detail={
-                          !availability.tokens ? "Model usage unavailable" : <>
-                            <span className="stat-accent">{models.length}</span>{" "}
-                            {models.length === 1
-                              ? "model explored"
-                              : "models explored"}
+                        ) : (
+                          "Not reported by local activity records"
+                        )
+                      }
+                      foot={
+                        isCursor
+                          ? "From your Cursor usage events"
+                          : isAll
+                            ? `Across ${harnessCount} ${harnessCount === 1 ? "harness" : "harnesses"} with history`
+                            : "Across all recorded history"
+                      }
+                    />
+                    <Stat
+                      index={2}
+                      label="API-equivalent value"
+                      value={
+                        availability.cost
+                          ? money(totals.costUsd)
+                          : "Unavailable"
+                      }
+                      detail={
+                        <>
+                          <span className="tag">Estimate</span> USD · current API rates
+                        </>
+                      }
+                      foot={
+                        !availability.cost
+                          ? "Requires priced token records"
+                          : totals.unpricedTokens > 0
+                            ? `${compact(totals.unpricedTokens)} tokens have no cost estimate`
+                            : "API bill equivalent"
+                      }
+                    />
+                    <Stat
+                      index={3}
+                      label="Recorded sessions"
+                      value={
+                        availability.sessions
+                          ? number(totals.sessions)
+                          : "Unavailable"
+                      }
+                      detail={
+                        availability.humanRequests ? (
+                          <>
+                            <strong>{number(totals.humanRequests)}</strong>{" "}
+                            human requests
                           </>
-                        }
-                        foot={
-                          availability.tokens && availability.sessions
-                            ? byRequests
-                              ? "Tokens ÷ sessions on days with exported tokens"
-                              : "Total tokens ÷ recorded sessions"
-                            : "Requires matching token and session coverage"
-                        }
-                      />
-                    </section>
-                    {availability.tokens ? (
-                      <>
-                        <section className="panel model-panel" id="models">
-                          <div className="panel-heading">
-                            <div>
-                              <h2>
-                                Your model mix{" "}
-                                <span className="subtle-tag">
-                                  ALL RECORDED HISTORY
-                                </span>
-                              </h2>
-                              <p>
-                                One bar. Every token. A different color for
-                                every model.
-                              </p>
-                            </div>
-                            <span className="mono subdued">
-                              {number(totals.totalTokens)} tokens
-                            </span>
-                          </div>
-                          <div
-                            className="model-stack"
-                            role="img"
-                            aria-label={models
-                              .map(
-                                (m) =>
-                                  `${m.model}: ${number(m.totalTokens)} tokens`,
-                              )
-                              .join(", ")}
-                          >
-                            {models.map((m, i) => (
-                              <div
-                                key={m.model}
-                                style={{
-                                  width: `${totals.totalTokens ? (m.totalTokens / totals.totalTokens) * 100 : 0}%`,
-                                  background: colorFor(i),
-                                }}
-                                title={`${modelLabel(m.model)} · ${compact(m.totalTokens)}`}
-                              />
-                            ))}
-                          </div>
-                          <div className="model-legend">
-                            {models.map((m, i) => (
-                              <span key={m.model}>
-                                <span
-                                  className="legend-dot"
-                                  style={{ background: colorFor(i) }}
-                                />
-                                {modelLabel(m.model)}
-                                <strong>
-                                  {shareText(m.totalTokens, totals.totalTokens)}
-                                </strong>
-                                <small>{compact(m.totalTokens)}</small>
-                              </span>
-                            ))}
-                            {!models.length && (
-                              <span>
-                                {isCursor ? "Add a fresh Cursor usage export to see your model mix." : `No tokens recorded. Start a ${product} session to see your model mix.`}
-                              </span>
-                            )}
-                          </div>
-                        </section>
-                        <div className="two-column">
-                          <section className="panel trend-panel">
-                            <div className="panel-heading">
-                              <div>
-                                <h2>Small prompts. Big momentum.</h2>
-                                <p>
-                                  Your daily{" "}
-                                  {metric === "tokens"
-                                    ? "token usage"
-                                    : "API-equivalent value"}{" "}
-                                  over time.
-                                </p>
-                              </div>
-                              <label className="select-wrap">
-                                <span className="sr-only">Date range</span>
-                                <select
-                                  value={range}
-                                  onChange={(e) =>
-                                    setRange(e.target.value as Range)
-                                  }
-                                >
-                                  <option>All time</option>
-                                  <option>Last 30 days</option>
-                                  <option>Last 7 days</option>
-                                </select>
-                                <ChevronDown size={12} />
-                              </label>
-                            </div>
-                            <div className="trend-summary">
-                              <strong>
-                                {metric === "tokens"
-                                  ? compact(
-                                      filtered.reduce(
-                                        (s, d) => s + d.totalTokens,
-                                        0,
-                                      ),
-                                    )
-                                  : money(
-                                      filtered.reduce(
-                                        (s, d) => s + d.costUsd,
-                                        0,
-                                      ),
-                                    )}
-                              </strong>
-                              <span>{range.toLowerCase()}</span>
-                              <div className="segmented">
-                                <button
-                                  className={
-                                    metric === "tokens" ? "selected" : ""
-                                  }
-                                  onClick={() => setMetric("tokens")}
-                                >
-                                  Tokens
-                                </button>
-                                <button
-                                  className={
-                                    metric === "cost" ? "selected" : ""
-                                  }
-                                  disabled={!availability.cost}
-                                  title={!availability.cost ? "Pricing is unavailable for these records" : undefined}
-                                  onClick={() => setMetric("cost")}
-                                >
-                                  Value
-                                </button>
-                              </div>
-                            </div>
-                            <div className="chart">
-                              {chart.length === 0 && <div className="chart-empty">No recorded usage rows in this date range.</div>}
-                              <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart
-                                  data={chart}
-                                  margin={{
-                                    left: -18,
-                                    right: 12,
-                                    top: 15,
-                                    bottom: 0,
-                                  }}
-                                >
-                                  <defs>
-                                    <linearGradient
-                                      id="tokenGradient"
-                                      x1="0"
-                                      y1="0"
-                                      x2="0"
-                                      y2="1"
-                                    >
-                                      <stop
-                                        offset="0%"
-                                        stopColor={accent}
-                                        stopOpacity={0.27}
-                                      />
-                                      <stop
-                                        offset="95%"
-                                        stopColor={accent}
-                                        stopOpacity={0}
-                                      />
-                                    </linearGradient>
-                                  </defs>
-                                  <CartesianGrid
-                                    stroke="#30342d"
-                                    strokeDasharray="3 5"
-                                    vertical={false}
-                                  />
-                                  <XAxis
-                                    dataKey="date"
-                                    tickFormatter={dateLabel}
-                                    stroke="#777e71"
-                                    tickLine={false}
-                                    axisLine={false}
-                                    fontSize={10}
-                                    minTickGap={30}
-                                    dy={10}
-                                  />
-                                  <YAxis
-                                    stroke="#777e71"
-                                    tickLine={false}
-                                    axisLine={false}
-                                    tickFormatter={
-                                      metric === "tokens"
-                                        ? compact
-                                        : (v) => `$${compact(v)}`
-                                    }
-                                    fontSize={10}
-                                  />
-                                  <Tooltip
-                                    contentStyle={tooltipStyle}
-                                    labelFormatter={(label) =>
-                                      new Date(
-                                        String(label) + "T12:00:00Z",
-                                      ).toLocaleDateString("en-US", {
-                                        month: "short",
-                                        day: "numeric",
-                                        year: "numeric",
-                                        timeZone: "UTC",
-                                      })
-                                    }
-                                    formatter={(value) => [
-                                      metric === "tokens"
-                                        ? `${number(Number(value))} tokens`
-                                        : money(Number(value)),
-                                      metric === "tokens"
-                                        ? "Usage"
-                                        : "API value",
-                                    ]}
-                                  />
-                                  <Area
-                                    isAnimationActive={false}
-                                    type="linear"
-                                    dot={
-                                      chart.length === 1
-                                        ? { r: 4, fill: accent }
-                                        : false
-                                    }
-                                    dataKey={metric}
-                                    stroke={accent}
-                                    strokeWidth={2}
-                                    fill="url(#tokenGradient)"
-                                    activeDot={{
-                                      r: 4,
-                                      fill: "#d5f99b",
-                                      stroke: "#171b14",
-                                      strokeWidth: 3,
-                                    }}
-                                  />
-                                </AreaChart>
-                              </ResponsiveContainer>
-                            </div>
-                            <div className="chart-caption">
-                              <span
-                                className="legend-dot"
-                                style={{ background: accent }}
-                              />{" "}
+                        ) : (
+                          isAntigravity ? "No Antigravity history found" : "Human requests not included in this source"
+                        )
+                      }
+                      foot={
+                        availability.assistantRequests
+                          ? `${number(totals.assistantRequests)} ${isCursor ? "usage events" : "model responses recorded"}`
+                          : "Model response count unavailable"
+                      }
+                    />
+                    <Stat
+                      index={4}
+                      label="Avg. tokens / session"
+                      value={
+                        availability.tokens && availability.sessions
+                          ? byRequests
+                            ? matchedSessions
+                              ? compact(matchedAverage)
+                              : "Unavailable"
+                            : compact(totals.averageTokensPerSession)
+                          : "Unavailable"
+                      }
+                      detail={
+                        !availability.tokens ? "Model usage unavailable" : <>
+                          <strong>{models.length}</strong>{" "}
+                          {models.length === 1
+                            ? "model explored"
+                            : "models explored"}
+                        </>
+                      }
+                      foot={
+                        availability.tokens && availability.sessions
+                          ? byRequests
+                            ? "Tokens ÷ sessions on days with exported tokens"
+                            : "Total tokens ÷ recorded sessions"
+                          : "Requires matching token and session coverage"
+                      }
+                    />
+                  </section>
+                  {availability.tokens ? (
+                    <div className={isAll ? "board board-all" : "board"}>
+                      <section className="panel p-trend" data-reveal>
+                        <div className="panel-head">
+                          <div>
+                            <PanelTitle text="A timeline of your AI usage" accent="AI usage" />
+                            <p className="panel-sub">
+                              Daily{" "}
                               {metric === "tokens"
-                                ? "Input + output tokens"
-                                : "Estimated API value (USD)"}
-                              <span>Dates in {data.timezone}</span>
-                            </div>
-                          </section>
-                          <section className="panel token-panel">
-                            <div className="panel-heading">
-                              <div>
-                                <h2>Under the hood</h2>
-                                <p>Where your tokens go.</p>
-                              </div>
-                              <Info size={15} className="subdued" />
-                            </div>
-                            <div className="donut-wrap">
-                              <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                  <Pie
-                                    isAnimationActive={false}
-                                    data={inputBreakdown}
-                                    dataKey="value"
-                                    nameKey="name"
-                                    minAngle={1}
-                                    innerRadius="64%"
-                                    outerRadius="84%"
-                                    paddingAngle={3}
-                                    stroke="none"
-                                    cornerRadius={4}
-                                  >
-                                    {inputBreakdown.map((d) => (
-                                      <Cell key={d.name} fill={d.color} />
-                                    ))}
-                                  </Pie>
-                                  <Tooltip
-                                    contentStyle={tooltipStyle}
-                                    formatter={(v) =>
-                                      `${number(Number(v))} tokens`
-                                    }
-                                  />
-                                </PieChart>
-                              </ResponsiveContainer>
-                              <div className="donut-label">
-                                <span>TOTAL TOKENS</span>
-                                <strong>{compact(totals.totalTokens)}</strong>
-                              </div>
-                            </div>
-                            <div className="token-legend">
-                              {inputBreakdown.map((d) => (
-                                <div key={d.name}>
-                                  <span
-                                    className="legend-dot"
-                                    style={{ background: d.color }}
-                                  />
-                                  <span>{d.name}</span>
-                                  <strong>
-                                    {shareText(d.value, totals.totalTokens)}
-                                  </strong>
-                                  <small>{compact(d.value)}</small>
-                                </div>
-                              ))}
-                            </div>
-                          </section>
-                        </div>
-                        <section className="panel activity-panel" id="activity">
-                          <div className="panel-heading">
-                            <div>
-                              <h2>
-                                A year of making things{" "}
-                                <label className="year-picker">
-                                  <span className="sr-only">Activity year</span>
-                                  <select
-                                    aria-label="Activity year"
-                                    value={
-                                      calendarYear ||
-                                      Number(
-                                        dayInZone(
-                                          data.generatedAt,
-                                          data.timezone,
-                                        ).slice(0, 4),
-                                      )
-                                    }
-                                    onChange={(e) =>
-                                      setYear(Number(e.target.value))
-                                    }
-                                  >
-                                    {Array.from(
-                                      new Set([
-                                        ...data.daily.map((d) =>
-                                          Number(d.date.slice(0, 4)),
-                                        ),
-                                        new Date(
-                                          data.generatedAt,
-                                        ).getUTCFullYear(),
-                                      ]),
-                                    )
-                                      .sort((a, b) => b - a)
-                                      .map((y) => (
-                                        <option key={y}>{y}</option>
-                                      ))}
-                                  </select>
-                                </label>
-                              </h2>
-                              <p>
-                                Every square is a day. Every day is a little
-                                progress.
-                              </p>
-                            </div>
-                            <div className="activity-count">
-                              <strong>
-                                {
-                                  data.daily.filter(
-                                    (d) =>
-                                      (d.totalTokens > 0 ||
-                                        (byRequests && d.humanRequests > 0)) &&
-                                      d.date.startsWith(String(calendarYear)),
-                                  ).length
-                                }
-                              </strong>{" "}
-                              active days this year
-                            </div>
+                                ? "input + output tokens"
+                                : "API-equivalent value (USD)"}{" "}
+                              {isAll && "stacked by harness "}· dates in {data.timezone}
+                            </p>
                           </div>
-                          <div className="heatmap-scroll" ref={heatmapRef}>
-                            <div className="heatmap-months">
-                              {[
-                                "Jan",
-                                "Feb",
-                                "Mar",
-                                "Apr",
-                                "May",
-                                "Jun",
-                                "Jul",
-                                "Aug",
-                                "Sep",
-                                "Oct",
-                                "Nov",
-                                "Dec",
-                              ].map((m) => (
-                                <span key={m}>{m}</span>
-                              ))}
-                            </div>
-                            <div className="heatmap-layout">
-                              <div className="day-labels">
-                                <span>Mon</span>
-                                <span>Wed</span>
-                                <span>Fri</span>
-                              </div>
-                              <div
-                                className="heatmap"
-                                role="group"
-                                aria-label={
-                                  byRequests
-                                    ? "Daily activity calendar"
-                                    : "Daily token contribution calendar"
+                          <div className="panel-tools">
+                            <label className="select-pill">
+                              <span className="sr-only">Date range</span>
+                              <select
+                                value={range}
+                                onChange={(e) =>
+                                  setRange(e.target.value as Range)
                                 }
                               >
-                                {activity.map((d) => {
-                                  const value = byRequests ? d.requests : d.tokens,
-                                    level =
-                                      value === 0 && !(byRequests && d.active)
-                                        ? 0
-                                        : Math.max(
-                                            1,
-                                            Math.min(
-                                              4,
-                                              Math.ceil((value / maxDay) * 4),
-                                            ),
-                                          );
-                                  return (
-                                    <button
-                                      key={d.date}
-                                      className={`heat-cell level-${level} ${d.future ? "future" : ""}`}
-                                      title={`${d.date} · ${number(d.tokens)} tokens · ${availability.humanRequests ? `${d.requests} human requests` : "human requests unavailable"}${d.future ? " · future date" : ""}`}
-                                      aria-label={`${d.date}: ${number(d.tokens)} tokens`}
-                                    />
-                                  );
-                                })}
-                              </div>
+                                <option>All time</option>
+                                <option>Last 30 days</option>
+                                <option>Last 7 days</option>
+                              </select>
+                              <ChevronDown size={12} />
+                            </label>
+                            <div className="segmented" role="group" aria-label="Measure">
+                              <button
+                                className={
+                                  metric === "tokens" ? "selected" : ""
+                                }
+                                aria-pressed={metric === "tokens"}
+                                onClick={() => setMetric("tokens")}
+                              >
+                                Tokens
+                              </button>
+                              <button
+                                className={
+                                  metric === "cost" ? "selected" : ""
+                                }
+                                aria-pressed={metric === "cost"}
+                                disabled={!availability.cost}
+                                title={!availability.cost ? "Pricing is unavailable for these records" : undefined}
+                                onClick={() => setMetric("cost")}
+                              >
+                                Value
+                              </button>
                             </div>
                           </div>
-                          <div className="heatmap-footer">
-                            <span>
-                              <span className="tiny-spark">✧</span> Consistency
-                              looks good on you.
-                            </span>
-                            <div>
-                              Less{" "}
-                              {[0, 1, 2, 3, 4].map((n) => (
-                                <i key={n} className={`heat-cell level-${n}`} />
-                              ))}{" "}
-                              More
-                            </div>
-                          </div>
-                        </section>
-                        <div className="two-column lower">
-                          <section className="panel hours-panel">
-                            <div className="panel-heading">
-                              <div>
-                                <h2>Your creative hours</h2>
-                                <p>Token activity by hour · {data.timezone}</p>
-                              </div>
-                              <Clock3 size={16} className="subdued" />
-                            </div>
-                            <div className="hour-chart">
-                              <ResponsiveContainer width="100%" height="100%">
-                                <BarChart
-                                  data={data.hours}
-                                  margin={{
-                                    left: -18,
-                                    right: 6,
-                                    top: 12,
-                                    bottom: 0,
-                                  }}
-                                >
-                                  <CartesianGrid
-                                    stroke="#30342d"
-                                    strokeDasharray="3 5"
-                                    vertical={false}
-                                  />
-                                  <XAxis
-                                    dataKey="hour"
-                                    interval={3}
-                                    tickFormatter={(v) =>
-                                      `${String(v).padStart(2, "0")}:00`
-                                    }
-                                    stroke="#777e71"
-                                    tickLine={false}
-                                    axisLine={false}
-                                    fontSize={10}
-                                  />
-                                  <YAxis
-                                    tickFormatter={compact}
-                                    stroke="#777e71"
-                                    tickLine={false}
-                                    axisLine={false}
-                                    fontSize={10}
-                                  />
-                                  <Tooltip
-                                    contentStyle={tooltipStyle}
-                                    cursor={{ fill: "#ffffff06" }}
-                                    labelFormatter={(v) =>
-                                      `${String(v).padStart(2, "0")}:00`
-                                    }
-                                    formatter={(v) => [
-                                      `${number(Number(v))} tokens`,
-                                      "Usage",
-                                    ]}
-                                  />
-                                  <Bar
-                                    isAnimationActive={false}
-                                    dataKey="tokens"
-                                    fill="#a78bfa"
-                                    radius={[3, 3, 0, 0]}
-                                  />
-                                </BarChart>
-                              </ResponsiveContainer>
-                            </div>
-                          </section>
-                          <section className="panel spotlight">
-                            <div className="spotlight-top">
-                              <span className="spotlight-icon">
-                                <Zap size={20} />
-                              </span>
-                              <span>THE POWER SESSION</span>
-                              <ArrowUpRight size={17} />
-                            </div>
-                            <h2>Your biggest 24 hours.</h2>
-                            <div className="spotlight-value">
-                              {!availability.cost
-                                ? "Unavailable"
-                                : data.mostExpensive24h
-                                  ? money(data.mostExpensive24h.costUsd)
-                                  : "—"}
-                              <span>API-equivalent value</span>
-                            </div>
-                            <p>
-                              {!availability.cost
-                                ? "Requires priced token records."
-                                : data.mostExpensive24h
-                                ? `${compact(data.mostExpensive24h.tokens)} tokens in your highest-value rolling 24-hour window.`
-                                : "Your most active window will appear as usage is recorded."}
-                            </p>
-                            <div className="spotlight-bottom">
-                              <Clock3 size={13} />
-                              {data.mostExpensive24h
-                                ? `${new Date(data.mostExpensive24h.start).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: data.timezone })} · ${new Date(data.mostExpensive24h.start).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: data.timezone })} → +24 hours`
-                                : "Waiting for history"}
-                            </div>
-                          </section>
                         </div>
-                        <section className="panel model-table">
-                          <div className="panel-heading">
+                        <p className="figure inline">
+                          <strong>
+                            <CountUp value={metric === "tokens"
+                              ? compact(
+                                  filtered.reduce(
+                                    (s, d) => s + d.totalTokens,
+                                    0,
+                                  ),
+                                )
+                              : money(
+                                  filtered.reduce(
+                                    (s, d) => s + d.costUsd,
+                                    0,
+                                  ),
+                                )} />
+                          </strong>
+                          <span>{range.toLowerCase()}</span>
+                        </p>
+                        {isAll && (
+                          <ul className="legend-inline trend-legend">
+                            {shares.map(({ provider: p }) => (
+                              <li key={p}><span className="swatch" style={{ background: HARNESS_COLORS[p] }} />{providerName(p)}</li>
+                            ))}
+                          </ul>
+                        )}
+                        <div className="chart">
+                          {chart.length === 0 && <div className="chart-empty">No recorded usage rows in this date range.</div>}
+                          <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart
+                              data={chart}
+                              margin={{
+                                left: -12,
+                                right: 8,
+                                top: 8,
+                                bottom: 0,
+                              }}
+                            >
+                              <CartesianGrid
+                                stroke={GRID}
+                                vertical={false}
+                              />
+                              <XAxis
+                                dataKey="date"
+                                tickFormatter={dateLabel}
+                                tick={axisTick}
+                                tickLine={false}
+                                axisLine={false}
+                                minTickGap={30}
+                                dy={8}
+                              />
+                              <YAxis
+                                tick={axisTick}
+                                tickLine={false}
+                                axisLine={false}
+                                tickFormatter={
+                                  metric === "tokens"
+                                    ? compact
+                                    : (v) => `$${compact(v)}`
+                                }
+                              />
+                              {isAll ? (
+                                <Tooltip content={<HarnessTooltip metric={metric} />} cursor={{ stroke: "#121212", strokeWidth: 1 }} />
+                              ) : <Tooltip
+                                contentStyle={tooltipStyle}
+                                cursor={{ stroke: "#121212", strokeWidth: 1 }}
+                                labelFormatter={(label) =>
+                                  new Date(
+                                    String(label) + "T12:00:00Z",
+                                  ).toLocaleDateString("en-US", {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                    timeZone: "UTC",
+                                  })
+                                }
+                                formatter={(value) => [
+                                  metric === "tokens"
+                                    ? `${number(Number(value))} tokens`
+                                    : money(Number(value)),
+                                  metric === "tokens"
+                                    ? "Usage"
+                                    : "API value",
+                                ]}
+                              />}
+                              {isAll ? shares.map(({ provider: p }) => (
+                                <Area
+                                  key={p}
+                                  isAnimationActive={false}
+                                  type="linear"
+                                  dataKey={`${p}_${metric}`}
+                                  name={providerName(p)}
+                                  stackId="harnesses"
+                                  stroke="#ffffff"
+                                  strokeWidth={1.5}
+                                  fill={HARNESS_COLORS[p]}
+                                  fillOpacity={1}
+                                  activeDot={false}
+                                />
+                              )) : <Area
+                                isAnimationActive={false}
+                                type="linear"
+                                dot={
+                                  chart.length === 1
+                                    ? { r: 4, fill: accent }
+                                    : false
+                                }
+                                dataKey={metric}
+                                stroke={accent}
+                                strokeWidth={2}
+                                fill={accent}
+                                fillOpacity={0.08}
+                                activeDot={{
+                                  r: 5,
+                                  fill: accent,
+                                  stroke: "#ffffff",
+                                  strokeWidth: 2,
+                                }}
+                              />}
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </section>
+                      {isAll && (
+                        <section className="panel p-harness" id="harnesses" data-reveal>
+                          <div className="panel-head">
                             <div>
-                              <h2>The model ledger</h2>
-                              <p>
-                                Input, output, and estimated value. Nothing
-                                hidden.
-                              </p>
+                              <PanelTitle text="Usage by harness" accent="harness" />
+                              <p className="panel-sub">Each harness’s share of your recorded tokens</p>
                             </div>
-                            <span className="subtle-tag">
-                              USD / STANDARD API RATES
-                            </span>
+                            <span className="panel-meta">{compact(overview.tokens)} reported tokens</span>
                           </div>
+                          {overview.tokens > 0 && (
+                            <div
+                              className="model-stack"
+                              role="img"
+                              aria-label={shares.map((s) => `${providerName(s.provider)}: ${number(s.tokens)} tokens`).join(", ")}
+                              data-active={harnessOn ? "" : undefined}
+                              onPointerMove={(e) => {
+                                const i = nearestSegment(e.currentTarget, e.clientX);
+                                const s = shares[i];
+                                if (!s || s.provider === harnessOn) return;
+                                setHarnessOn(s.provider);
+                                tip.show(e.currentTarget.children[i], (
+                                  <>
+                                    <div className="tip-title"><span className="swatch" style={{ background: HARNESS_COLORS[s.provider] }} />{providerName(s.provider)}</div>
+                                    <div className="tip-row"><strong>{shareText(s.tokens, overview.tokens)}</strong> of all tokens</div>
+                                    <div className="tip-row">{number(s.tokens)} tokens</div>
+                                  </>
+                                ));
+                              }}
+                              onPointerLeave={(e) => { setHarnessOn(null); tip.leave(e); }}
+                            >
+                              {shares.map((s) => (
+                                <div
+                                  key={s.provider}
+                                  data-on={harnessOn === s.provider ? "" : undefined}
+                                  style={{ width: `${(s.tokens / overview.tokens) * 100}%`, background: HARNESS_COLORS[s.provider] }}
+                                />
+                              ))}
+                            </div>
+                          )}
                           <div className="table-scroll">
-                            <table>
+                            <table className="ledger">
                               <thead>
-                                <tr>
-                                  <th>MODEL</th>
-                                  <th>INPUT</th>
-                                  <th>CACHED INPUT¹</th>
-                                  {(isClaude || isCursor) && (
-                                    <th>CACHE WRITES¹</th>
-                                  )}
-                                  <th>OUTPUT</th>
-                                  <th>API VALUE</th>
-                                </tr>
+                                <tr><th>Harness</th><th>Tokens</th><th>Share</th><th>Sessions</th><th>Human requests</th><th>API value</th></tr>
                               </thead>
                               <tbody>
-                                {models.map((m, i) => (
-                                  <tr key={m.model}>
-                                    <td>
-                                      <span
-                                        className="legend-dot"
-                                        style={{
-                                          background: colorFor(i),
-                                        }}
-                                      />
-                                      {modelLabel(m.model)}
-                                    </td>
-                                    <td title={number(m.inputTokens)}>
-                                      {compact(m.inputTokens)}
-                                    </td>
-                                    <td title={number(m.cachedInputTokens)}>
-                                      {compact(m.cachedInputTokens)}
-                                    </td>
-                                    {(isClaude || isCursor) && (
-                                      <td title={number(m.cacheWriteTokens)}>
-                                        {compact(m.cacheWriteTokens)}
+                                {(harnesses ?? []).map(({ provider: p, snapshot, error: failed }) => {
+                                  const recorded = snapshot && hasHistory(snapshot);
+                                  const cell = (key: keyof MetricAvailability, amount: number, format = compact) =>
+                                    recorded && metricAvailable(snapshot, key) ? format(amount) : "—";
+                                  const tokens = recorded && metricAvailable(snapshot, "tokens") ? snapshot.totals.totalTokens : null;
+                                  return (
+                                    <tr key={p} data-on={harnessOn === p ? "" : undefined}
+                                      onPointerEnter={() => setHarnessOn(p)} onPointerLeave={() => setHarnessOn(null)}>
+                                      <td>
+                                        <Link className="row-link" href={harnessHref(p)}>
+                                          <span className="swatch" style={{ background: HARNESS_COLORS[p] }} />
+                                          {providerName(p)} <ArrowUpRight size={12} />
+                                        </Link>
+                                        <small>
+                                          {failed || (!recorded
+                                            ? "No recorded history"
+                                            : `Collected ${new Date(snapshot.generatedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: snapshot.timezone })}`)}
+                                        </small>
                                       </td>
-                                    )}
-                                    <td title={number(m.outputTokens)}>
-                                      {compact(m.outputTokens)}
-                                    </td>
-                                    <td>
-                                      {!availability.cost ? (
-                                        "Unavailable"
-                                      ) : !m.priced ? (
-                                        <span title="Some or all tokens have no verified API price">
-                                          {m.costUsd > 0
-                                            ? `${money(m.costUsd)} + unpriced`
-                                            : "Unpriced"}
-                                        </span>
-                                      ) : (
-                                        money(m.costUsd)
-                                      )}
-                                    </td>
-                                  </tr>
-                                ))}
+                                      <td title={tokens === null ? "Tokens unavailable" : number(tokens)}>{tokens === null ? "—" : compact(tokens)}</td>
+                                      <td>{tokens === null || !overview.tokens ? "—" : shareText(tokens, overview.tokens)}</td>
+                                      <td>{snapshot ? cell("sessions", snapshot.totals.sessions, number) : "—"}</td>
+                                      <td>{snapshot ? cell("humanRequests", snapshot.totals.humanRequests, number) : "—"}</td>
+                                      <td>
+                                        {snapshot ? cell("cost", snapshot.totals.costUsd, money) : "—"}
+                                        {recorded && snapshot.totals.unpricedTokens > 0 && <small>+ unpriced tokens</small>}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>
-                          <div className="table-note">
-                            ¹ Cached tokens are part of input, not additional
-                            tokens. Reasoning is included in output.{" "}
-                            <button onClick={() => setInfo(true)}>
-                              Pricing & methodology <ArrowUpRight size={11} />
+                          <p className="table-note">
+                            — means this metric or history is unavailable. Totals include only reported metrics.{" "}
+                            <button className="text-link" onClick={() => setInfo(true)}>
+                              About these totals <ArrowUpRight size={12} />
                             </button>
-                          </div>
+                          </p>
                         </section>
-                      </>
-                    ) : (
-                      <section className="panel import-state" id="models">
-                        <Database size={24} />
-                        <h2>
-                          {isAntigravity
-                            ? "No Antigravity conversations found."
-                            : "Token graphs need a usage export."}
-                        </h2>
-                        <p>
-                          {isAntigravity
-                            ? "Use Antigravity once, or set ANTIGRAVITY_HOME to the folder that contains antigravity/ and antigravity-cli/ (default ~/.gemini). This view re-reads those local databases every 15 seconds."
-                            : "Set CURSOR_AUTO_SYNC=true to fetch your usage events from your Cursor account automatically, or export them from your Cursor dashboard and set CURSOR_USAGE_CSV / put exports in data/cursor-imports. This view checks for changes every 15 seconds. Local context-window counters are not treated as billed token records."}
-                        </p>
-                        {!isAntigravity && (
-                          <a
-                            className="button"
-                            href="https://cursor.com/dashboard/usage"
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Open Cursor usage <ExternalLink size={13} />
-                          </a>
-                        )}
+                      )}
+                      <section className="panel p-mix" id="models" data-reveal>
+                        <div className="panel-head">
+                          <div>
+                            <PanelTitle text="Your model mix" accent="mix" />
+                            <p className="panel-sub">Share of every recorded token{isAll && ", across harnesses"}</p>
+                          </div>
+                          <span className="panel-meta">
+                            {compact(totals.totalTokens)} tokens
+                          </span>
+                        </div>
+                        <div
+                          className="model-stack"
+                          data-active={mixOn ? "" : undefined}
+                          // The whole bar is the hover target: the nearest segment wins, so
+                          // thin slivers are still easy to reach.
+                          onPointerMove={(e) => {
+                            const best = nearestSegment(e.currentTarget, e.clientX);
+                            const s = segments[best];
+                            if (!s || s.key === mixOn) return;
+                            setMixOn(s.key);
+                            tip.show(e.currentTarget.children[best], (
+                              <>
+                                <div className="tip-title"><span className="swatch" style={{ background: s.color }} />{s.label}</div>
+                                <div className="tip-row"><strong>{shareText(s.tokens, totals.totalTokens)}</strong> of all tokens</div>
+                                <div className="tip-row">{number(s.tokens)} tokens</div>
+                              </>
+                            ));
+                          }}
+                          onPointerLeave={(e) => { setMixOn(null); tip.leave(e); }}
+                          role="img"
+                          aria-label={models
+                            .map(
+                              (m) =>
+                                `${m.model}: ${number(m.totalTokens)} tokens`,
+                            )
+                            .join(", ")}
+                        >
+                          {segments.map((s) => (
+                            <div
+                              key={s.key}
+                              data-on={mixOn === s.key ? "" : undefined}
+                              style={{
+                                width: `${totals.totalTokens ? (s.tokens / totals.totalTokens) * 100 : 0}%`,
+                                background: s.color,
+                              }}
+                            />
+                          ))}
+                        </div>
+                        <ul className="legend-list" data-active={mixOn ? "" : undefined}>
+                          {segments.map((s) => (
+                            <li
+                              key={s.key}
+                              data-on={mixOn === s.key ? "" : undefined}
+                              onPointerEnter={() => setMixOn(s.key)}
+                              onPointerLeave={() => setMixOn(null)}
+                            >
+                              <span
+                                className="swatch"
+                                style={{ background: s.color }}
+                              />
+                              <span className="legend-name">{s.label}</span>
+                              <strong>
+                                {shareText(s.tokens, totals.totalTokens)}
+                              </strong>
+                              <small>{compact(s.tokens)}</small>
+                            </li>
+                          ))}
+                          {!models.length && (
+                            <li className="legend-empty">
+                              {isCursor
+                                ? "Add a fresh Cursor usage export to see your model mix."
+                                : isAll
+                                  ? "No tokens recorded. Collect or sync usage from a harness to see your model mix."
+                                  : `No tokens recorded. Start a ${product} session to see your model mix.`}
+                            </li>
+                          )}
+                        </ul>
                       </section>
-                    )}
-                    <footer>
-                      <span className="footer-brand">
-                        <Terminal size={14} /> {brand} atlas <span>·</span> Made
-                        of small moments.
-                      </span>
-                      <span>
-                        <span className="live-dot" /> Real history. Live
-                        perspective.{" "}
-                        <button onClick={() => setInfo(true)}>
-                          Data & privacy <ArrowUpRight size={11} />
-                        </button>
-                      </span>
-                    </footer>
-                  </>
-                )
-              )}
-            </>
-          )}
-        </main>
-      </div>
+                      <section className="panel p-activity" id="activity" data-reveal>
+                        <div className="panel-head">
+                          <div>
+                            <PanelTitle text="A year of making things" accent="making things" />
+                            <p className="panel-sub">
+                              One square per day, shaded by {byRequests ? "requests" : "tokens"}
+                            </p>
+                          </div>
+                          <div className="panel-tools">
+                            <p className="figure inline">
+                              <strong><CountUp value={String(activeDays)} /></strong>
+                              <span>active days</span>
+                            </p>
+                            <label className="select-pill">
+                              <span className="sr-only">Activity year</span>
+                              <select
+                                aria-label="Activity year"
+                                value={
+                                  calendarYear ||
+                                  Number(
+                                    dayInZone(
+                                      data.generatedAt,
+                                      data.timezone,
+                                    ).slice(0, 4),
+                                  )
+                                }
+                                onChange={(e) =>
+                                  setYear(Number(e.target.value))
+                                }
+                              >
+                                {Array.from(
+                                  new Set([
+                                    ...data.daily.map((d) =>
+                                      Number(d.date.slice(0, 4)),
+                                    ),
+                                    new Date(
+                                      data.generatedAt,
+                                    ).getUTCFullYear(),
+                                  ]),
+                                )
+                                  .sort((a, b) => b - a)
+                                  .map((y) => (
+                                    <option key={y}>{y}</option>
+                                  ))}
+                              </select>
+                              <ChevronDown size={12} />
+                            </label>
+                          </div>
+                        </div>
+                        <div className="heatmap-scroll" ref={heatmapRef}>
+                          <div className="heatmap-months">
+                            {[
+                              "Jan",
+                              "Feb",
+                              "Mar",
+                              "Apr",
+                              "May",
+                              "Jun",
+                              "Jul",
+                              "Aug",
+                              "Sep",
+                              "Oct",
+                              "Nov",
+                              "Dec",
+                            ].map((m) => (
+                              <span key={m}>{m}</span>
+                            ))}
+                          </div>
+                          <div className="heatmap-layout">
+                            <div className="day-labels">
+                              <span>Mon</span>
+                              <span>Wed</span>
+                              <span>Fri</span>
+                            </div>
+                            <div
+                              className="heatmap"
+                              // One listener for every day: pointer or keyboard focus shows its card.
+                              onPointerOver={(e) => showDay(e.target as Element)}
+                              onFocus={(e) => showDay(e.target as Element)}
+                              onPointerLeave={tip.leave}
+                              onBlur={tip.hide}
+                              role="group"
+                              aria-label={
+                                byRequests
+                                  ? "Daily activity calendar"
+                                  : "Daily token contribution calendar"
+                              }
+                            >
+                              {activity.map((d, i) => {
+                                const value = byRequests ? d.requests : d.tokens,
+                                  level =
+                                    value === 0 && !(byRequests && d.active)
+                                      ? 0
+                                      : Math.max(
+                                          1,
+                                          Math.min(
+                                            4,
+                                            Math.ceil((value / maxDay) * 4),
+                                          ),
+                                        );
+                                return (
+                                  <button
+                                    key={d.date}
+                                    className={`heat-cell level-${level} ${d.future ? "future" : ""}`}
+                                    style={{ "--c": Math.floor(i / 7) } as React.CSSProperties}
+                                    data-i={i}
+                                    aria-label={`${d.date}: ${number(d.tokens)} tokens`}
+                                  />
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="heatmap-footer">
+                          Less{" "}
+                          {[0, 1, 2, 3, 4].map((n) => (
+                            <i key={n} className={`heat-cell level-${n}`} />
+                          ))}{" "}
+                          More
+                        </div>
+                      </section>
+                      <section className="panel p-hood" data-reveal>
+                        <div className="panel-head">
+                          <div>
+                            <PanelTitle text="Under the hood" accent="hood" />
+                            <p className="panel-sub">Where your tokens go</p>
+                          </div>
+                        </div>
+                        <div className="hood">
+                          <div
+                            className="donut-wrap"
+                            // The ring is the hover target: the pointer's angle picks the slice.
+                            // Slices start at 12 o'clock and run clockwise; minAngle mirrors
+                            // the Pie below so thin slices line up.
+                            onPointerMove={(e) => {
+                              const r = e.currentTarget.getBoundingClientRect();
+                              const dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+                              const radius = Math.min(r.width, r.height) / 2;
+                              if (Math.hypot(dx, dy) < radius * 0.56) return setHoodOn(null);
+                              const angle = ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
+                              const sum = inputBreakdown.reduce((t, d) => t + d.value, 0);
+                              const spread = 360 - inputBreakdown.length * DONUT_MIN_ANGLE;
+                              let end = 0;
+                              const i = inputBreakdown.findIndex((d) => (end += DONUT_MIN_ANGLE + (d.value / sum) * spread) > angle);
+                              setHoodOn(i < 0 ? inputBreakdown.length - 1 : i);
+                            }}
+                            onPointerLeave={() => setHoodOn(null)}
+                          >
+                            <ResponsiveContainer width="100%" height="100%">
+                              <PieChart>
+                                <Pie
+                                  isAnimationActive={false}
+                                  data={inputBreakdown}
+                                  dataKey="value"
+                                  nameKey="name"
+                                  minAngle={DONUT_MIN_ANGLE}
+                                  startAngle={90}
+                                  endAngle={-270}
+                                  innerRadius="64%"
+                                  outerRadius="96%"
+                                  stroke="#ffffff"
+                                  strokeWidth={2}
+                                >
+                                  {inputBreakdown.map((d, i) => (
+                                    <Cell key={d.name} fill={d.color} fillOpacity={hoodOn === null || hoodOn === i ? 1 : 0.25} />
+                                  ))}
+                                </Pie>
+                              </PieChart>
+                            </ResponsiveContainer>
+                            {/* The centre reads out the hovered slice, or the total. The total stays
+                                mounted so its count-up doesn't replay after every hover. */}
+                            <div className="donut-label" aria-live="polite">
+                              <span>{hovered ? hovered.name : "Total"}</span>
+                              <strong>
+                                {hovered && compact(hovered.value)}
+                                <span hidden={Boolean(hovered)}><CountUp value={compact(totals.totalTokens)} /></span>
+                              </strong>
+                              {hovered && <small>{shareText(hovered.value, totals.totalTokens)}</small>}
+                            </div>
+                          </div>
+                          <ul className="legend-list" data-active={hovered ? "" : undefined}>
+                            {inputBreakdown.map((d, i) => (
+                              <li
+                                key={d.name}
+                                data-on={hoodOn === i ? "" : undefined}
+                                onPointerEnter={() => setHoodOn(i)}
+                                onPointerLeave={() => setHoodOn(null)}
+                              >
+                                <span
+                                  className="swatch"
+                                  style={{ background: d.color }}
+                                />
+                                <span className="legend-name">{d.name}</span>
+                                <strong>
+                                  {shareText(d.value, totals.totalTokens)}
+                                </strong>
+                                <small>{compact(d.value)}</small>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </section>
+                      <section className="panel p-hours" data-reveal>
+                        <div className="panel-head">
+                          <div>
+                            <PanelTitle text="Your creative hours" accent="creative" />
+                            <p className="panel-sub">Tokens by hour of day · {data.timezone}</p>
+                          </div>
+                        </div>
+                        <div className="hour-chart">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart
+                              data={data.hours}
+                              margin={{
+                                left: -12,
+                                right: 4,
+                                top: 8,
+                                bottom: 0,
+                              }}
+                            >
+                              <CartesianGrid
+                                stroke={GRID}
+                                vertical={false}
+                              />
+                              <XAxis
+                                dataKey="hour"
+                                interval={3}
+                                tickFormatter={(v) =>
+                                  `${String(v).padStart(2, "0")}:00`
+                                }
+                                tick={axisTick}
+                                tickLine={false}
+                                axisLine={false}
+                              />
+                              <YAxis
+                                tickFormatter={compact}
+                                tick={axisTick}
+                                tickLine={false}
+                                axisLine={false}
+                              />
+                              <Tooltip
+                                contentStyle={tooltipStyle}
+                                cursor={{ fill: "#f2f2f2" }}
+                                labelFormatter={(v) =>
+                                  `${String(v).padStart(2, "0")}:00`
+                                }
+                                formatter={(v) => [
+                                  `${number(Number(v))} tokens`,
+                                  "Usage",
+                                ]}
+                              />
+                              <Bar
+                                isAnimationActive={false}
+                                dataKey="tokens"
+                                fill={accent}
+                                radius={[4, 4, 0, 0]}
+                              />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </section>
+                      <section className="panel p-power spotlight" data-reveal>
+                        <p className="eyebrow on-dark">The power session</p>
+                        <h2 className="panel-title">Your biggest 24 hours.</h2>
+                        {/* The figure shrinks to fit the panel on one line, so a value never breaks mid-number. */}
+                        <div className="spotlight-value" style={{ "--chars": Math.max(powerValue.length, 4) } as React.CSSProperties}>
+                          <CountUp value={powerValue} />
+                        </div>
+                        <span className="spotlight-unit">API-equivalent value</span>
+                        <p>
+                          {!availability.cost
+                            ? "Requires priced token records."
+                            : power
+                            ? `${compact(power.window.tokens)} tokens in ${providerName(power.provider)}’s highest-value rolling 24-hour window.`
+                            : data.mostExpensive24h
+                            ? `${compact(data.mostExpensive24h.tokens)} tokens in your highest-value rolling 24-hour window.`
+                            : "Your most active window will appear as usage is recorded."}
+                        </p>
+                        <div className="spotlight-bottom">
+                          {data.mostExpensive24h
+                            ? `${new Date(data.mostExpensive24h.start).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: data.timezone })} · ${new Date(data.mostExpensive24h.start).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: data.timezone })} → +24 hours`
+                            : "Waiting for history"}
+                        </div>
+                      </section>
+                      <section className="panel p-ledger" data-reveal>
+                        <div className="panel-head">
+                          <div>
+                            <PanelTitle text="The model ledger" accent="ledger" />
+                            <p className="panel-sub">Input, output and estimated value per model · USD at standard API rates</p>
+                          </div>
+                        </div>
+                        <div className="table-scroll">
+                          <table className="ledger">
+                            <thead>
+                              <tr>
+                                <th>Model</th>
+                                <th>Input</th>
+                                <th>Cached input¹</th>
+                                {(isClaude || isCursor || isAll) && (
+                                  <th>Cache writes¹</th>
+                                )}
+                                <th>Output</th>
+                                <th>API value</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {models.map((m, i) => (
+                                <tr key={m.model}>
+                                  <td>
+                                    <span
+                                      className="swatch"
+                                      style={{
+                                        background: colorFor(i),
+                                      }}
+                                    />
+                                    {modelLabel(m.model)}
+                                  </td>
+                                  <td title={number(m.inputTokens)}>
+                                    {compact(m.inputTokens)}
+                                  </td>
+                                  <td title={number(m.cachedInputTokens)}>
+                                    {compact(m.cachedInputTokens)}
+                                  </td>
+                                  {(isClaude || isCursor || isAll) && (
+                                    <td title={number(m.cacheWriteTokens)}>
+                                      {compact(m.cacheWriteTokens)}
+                                    </td>
+                                  )}
+                                  <td title={number(m.outputTokens)}>
+                                    {compact(m.outputTokens)}
+                                  </td>
+                                  <td>
+                                    {!availability.cost ? (
+                                      "Unavailable"
+                                    ) : !m.priced ? (
+                                      <span title="Some or all tokens have no verified API price">
+                                        {m.costUsd > 0
+                                          ? `${money(m.costUsd)} + unpriced`
+                                          : "Unpriced"}
+                                      </span>
+                                    ) : (
+                                      money(m.costUsd)
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="table-note">
+                          ¹ Cached tokens are part of input, not additional
+                          tokens. Reasoning is included in output.{" "}
+                          <button className="text-link" onClick={() => setInfo(true)}>
+                            Pricing & methodology <ArrowUpRight size={12} />
+                          </button>
+                        </p>
+                      </section>
+                    </div>
+                  ) : (
+                    <section className="notice-block import-state" id="models">
+                      <h2 className="display-s">
+                        {isAll
+                          ? "No harness reports tokens yet."
+                          : isAntigravity
+                          ? "No Antigravity conversations found."
+                          : "Token graphs need a usage export."}
+                      </h2>
+                      <p>
+                        {isAll
+                          ? "Collect or sync usage from Codex, Claude Code, Cursor or Antigravity to see your combined graphs here. This view checks for changes every 15 seconds."
+                          : isAntigravity
+                          ? "Use Antigravity once, or set ANTIGRAVITY_HOME to the folder that contains antigravity/ and antigravity-cli/ (default ~/.gemini). This view re-reads those local databases every 15 seconds."
+                          : "Set CURSOR_AUTO_SYNC=true to fetch your usage events from your Cursor account automatically, or export them from your Cursor dashboard and set CURSOR_USAGE_CSV / put exports in data/cursor-imports. This view checks for changes every 15 seconds. Local context-window counters are not treated as billed token records."}
+                      </p>
+                      {isCursor && (
+                        <a
+                          className="pill pill-outline"
+                          href="https://cursor.com/dashboard/usage"
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open Cursor usage <ExternalLink size={14} />
+                        </a>
+                      )}
+                    </section>
+                  )}
+                </>
+              )
+            )}
+          </>
+        )}
+      </main>
+      <HoverTip tip={tip.tip} />
+      <footer className="site-footer">
+        <span className="wordmark small">{brand}<span>vibe check</span></span>
+        <button className="text-link" onClick={() => setInfo(true)}>
+          Data & privacy <ArrowUpRight size={12} />
+        </button>
+        <a
+          className="text-link"
+          href="https://www.linkedin.com/in/darrellchee"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Buy me a coffee <ArrowUpRight size={12} />
+        </a>
+      </footer>
       {info && (
         <div className="modal-backdrop" onClick={() => setInfo(false)}>
           <section
@@ -1417,25 +1471,41 @@ export default function Dashboard({
           >
             <button
               autoFocus
-              className="modal-close icon-button"
+              className="modal-close round"
               aria-label="Close methodology"
               onClick={() => setInfo(false)}
             >
               <X size={18} />
             </button>
-            <div className="eyebrow">
-              <Database size={14} /> BEHIND THE NUMBERS
-            </div>
-            <h2 id="method-title">A clear view of your usage.</h2>
+            <p className="eyebrow">Behind the numbers</p>
+            <h2 id="method-title" className="display-s">A clear view of your usage.</h2>
             <p>
               This dashboard measures{" "}
               <strong>retained {product} history</strong>, not a verified
               account lifetime. Deleted sessions, other devices, and cloud-only
               sessions may be missing. Your subscription bill is separate.
             </p>
+            {isAll && (
+              <>
+                <h3>How harnesses add up</h3>
+                <p>
+                  Totals add the retained usage each harness reports, and only
+                  the metrics it reports: a harness that cannot report a metric
+                  is left out of that total, not counted as zero. Sessions and
+                  requests follow each harness’s own definitions. Days use each
+                  source’s recorded timezone, and overlapping imports across
+                  harnesses are not deduplicated. Hours of day include harnesses
+                  recorded in {data?.timezone ?? "your timezone"}. The power
+                  session is the biggest single-harness 24-hour window, since
+                  windows cannot be joined across harnesses from totals alone.
+                </p>
+              </>
+            )}
             <h3>What counts?</h3>
             <p>
-              {isCursor
+              {isAll
+                ? "Each harness counts input its own way; open its page for the details."
+                : isCursor
                 ? "Cursor token totals come from your usage events (automatic account sync or imported exports). Input includes ordinary input, cache reads and cache writes. Exported usage events are model calls, not human prompts. Sessions and human requests come from local Cursor history when it is available, and cover only what this device retained."
                 : isAntigravity
                   ? "Antigravity input is uncached input plus cache reads; cache writes are not recorded. Output includes thinking tokens. Each recorded model call is one request, and human requests are user-input steps."
@@ -1466,17 +1536,17 @@ export default function Dashboard({
             </p>
             {data && (
               <>
-                <div className="method-meta">
-                  <span>Last collected</span>
-                  <strong>{new Date(data.generatedAt).toLocaleString()}</strong>
-                  <span>History files scanned</span>
-                  <strong>{data.coverage.filesScanned}</strong>
-                  <span>Pricing checked</span>
-                  <strong>{data.pricing.checkedAt}</strong>
-                </div>
+                <dl className="method-meta">
+                  <dt>Last collected</dt>
+                  <dd>{new Date(data.generatedAt).toLocaleString()}</dd>
+                  <dt>History files scanned</dt>
+                  <dd>{data.coverage.filesScanned}</dd>
+                  <dt>Pricing checked</dt>
+                  <dd>{data.pricing.checkedAt}</dd>
+                </dl>
                 {data.coverage.warnings.map((w, i) => (
                   <p className="method-warning" key={i}>
-                    <Info size={13} />
+                    <Info size={14} />
                     {w}
                   </p>
                 ))}
@@ -1492,8 +1562,8 @@ export default function Dashboard({
                 </div>
               </>
             )}
-            <button className="button primary" onClick={() => setInfo(false)}>
-              <Check size={14} /> Got it
+            <button className="pill pill-filled" onClick={() => setInfo(false)}>
+              <Check size={16} /> Got it
             </button>
           </section>
         </div>
@@ -1502,28 +1572,28 @@ export default function Dashboard({
   );
 }
 function Stat({
+  index,
   label,
   value,
-  icon,
   detail,
   foot,
 }: {
+  index: number;
   label: string;
   value: string;
-  icon: React.ReactNode;
   detail: React.ReactNode;
   foot: string;
 }) {
   return (
     <article className="stat">
       <div className="stat-label">
+        <span className="stat-index">{String(index).padStart(2, "0")}</span>
         {label}
-        {icon}
       </div>
       <div
         className={`stat-value ${value === "Unavailable" ? "unavailable" : ""}`}
       >
-        {value}
+        <CountUp value={value} />
       </div>
       <div className="stat-detail">{detail}</div>
       <div className="stat-foot">{foot}</div>

@@ -24,7 +24,7 @@ const instance = (publicCards: boolean) =>
 test("claimed sites publish the Antigravity card by default; env flags and failures stay private", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "antigravity-cards-"));
   const keys = [
-    "ATLAS_MODE",
+    "VIBE_CHECK_MODE",
     "UPSTASH_REDIS_REST_URL",
     "UPSTASH_REDIS_REST_TOKEN",
     "ANTIGRAVITY_HOME",
@@ -36,7 +36,7 @@ test("claimed sites publish the Antigravity card by default; env flags and failu
   const realFetch = globalThis.fetch;
   try {
     Object.assign(process.env, {
-      ATLAS_MODE: "cloud",
+      VIBE_CHECK_MODE: "cloud",
       UPSTASH_REDIS_REST_URL: "https://storage.example",
       UPSTASH_REDIS_REST_TOKEN: "private-redis-token",
       ANTIGRAVITY_HOME: home, // empty: nothing from the real machine is read
@@ -58,7 +58,7 @@ test("claimed sites publish the Antigravity card by default; env flags and failu
       return Response.json({ result: JSON.stringify(snapshot) });
     };
     const request = (route: string) =>
-      new Request(`https://atlas.example/api/${route}?provider=antigravity`);
+      new Request(`https://vibe-check.example/api/${route}?provider=antigravity`);
 
     // Default after claiming: public, as an image that carries no source strings.
     const cardResponse = await card(request("card"));

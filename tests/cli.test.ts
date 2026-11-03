@@ -15,7 +15,7 @@ import path from "node:path";
 
 const root = process.cwd();
 test("collector and sync CLIs isolate all four products, continue after a failed upload and stop watch cleanly", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "atlas-cli-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "vibe-check-cli-"));
   const token = "synthetic-cli-secret-at-least-32-characters";
   const received: string[] = [];
   let rejectCodex = false,
