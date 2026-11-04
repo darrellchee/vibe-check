@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { deployRedirectTarget, expectedSite, isDeployedStatus, linkedSite, newProjectName, setupStep } from "../lib/setup-flow";
+import { deployRedirectTarget, linkedSite, setupStep } from "../lib/setup-flow";
 import { setupState } from "../lib/instance";
 import type { SetupState } from "../lib/instance";
 
@@ -82,14 +82,3 @@ test("tabs only hand over a deployed site that is a vercel.app setup page", asyn
     assert.equal(readDeployMessage(bad), null, JSON.stringify(bad));
 });
 
-test("the waiting tab watches the new project's own vercel.app address", () => {
-  const name = newProjectName();
-  assert.match(name, /^vibe-check-[a-z0-9]{8}$/);
-  assert.notEqual(newProjectName(), name); // A fresh name every deploy.
-  assert.equal(newProjectName(new Uint8Array([0, 1, 2, 3, 26, 27, 35, 36])), "vibe-check-abcd019a");
-  assert.equal(expectedSite(name), `https://${name}.vercel.app`);
-  for (const bad of [null, undefined, "", "1", "vibe-check", "vibe-check-ABCDEFGH", "vibe-check-abc.evil", "evil.com/vibe-check-abcdefgh"])
-    assert.equal(expectedSite(bad), null, String(bad));
-  assert.equal(isDeployedStatus({ cloud: true, storage: "missing" }), true);
-  for (const body of [null, "x", {}, { cloud: false, site: null }, { cloud: "true" }]) assert.equal(isDeployedStatus(body), false);
-});

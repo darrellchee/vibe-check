@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Check, Copy, ExternalLink, LoaderCircle } from "lucide-react";
@@ -7,7 +7,7 @@ import { chooseLocalDashboard } from "@/lib/local-dashboard";
 import { Headline } from "@/components/vibe-check-chrome";
 import { hasHistory, loadHarnesses } from "@/lib/overview";
 import { deploymentUrl, profileEmbed } from "@/lib/profile-card";
-import { DEPLOY_CHANNEL, DEPLOY_PENDING_KEY, deployRedirectTarget, expectedSite, isDeployedStatus, newProjectName, readDeployMessage, SETUP_STEPS, setupStep } from "@/lib/setup-flow";
+import { DEPLOY_CHANNEL, DEPLOY_PENDING_KEY, deployRedirectTarget, readDeployMessage, SETUP_STEPS, setupStep } from "@/lib/setup-flow";
 import { DEFAULT_STORAGE, marketplaceUrl, STORAGE_PROVIDERS, type StorageProviderId } from "@/lib/storage-providers";
 import type { SetupState } from "@/lib/instance";
 import s from "./setup.module.css";
@@ -30,17 +30,29 @@ const installCommand = ({ origin, code }: Connect) => `curl -fsSL ${origin}/api/
 // How long the tab Vercel returns to waits for the setup tab to answer before moving on itself.
 const HANDOFF_MS = 800;
 const channel = () => (typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(DEPLOY_CHANNEL));
-// How often the waiting tab checks whether the new site is up.
-const DEPLOY_POLL_MS = 4_000;
 // "Waiting for your deployment" survives a reload of the setup tab, for this browser session only.
-// It holds the project name being deployed, so the tab keeps watching the same address.
+// It also keeps the site already known when the deploy started ("1" when none), so an old site
+// doesn't end the wait for a new copy.
+const NO_SITE = "1";
 const pending = {
-  get: (): string | null => { try { return window.sessionStorage.getItem(DEPLOY_PENDING_KEY); } catch { return null; } },
-  set: (project: string | false) => {
-    try { if (project) window.sessionStorage.setItem(DEPLOY_PENDING_KEY, project); else window.sessionStorage.removeItem(DEPLOY_PENDING_KEY); }
+  get: (): { before: string | null } | null => {
+    try {
+      const value = window.sessionStorage.getItem(DEPLOY_PENDING_KEY);
+      return value === null ? null : { before: value === NO_SITE ? null : value };
+    } catch { return null; }
+  },
+  set: (on: false | { before: string | null }) => {
+    try { if (on) window.sessionStorage.setItem(DEPLOY_PENDING_KEY, on.before ?? NO_SITE); else window.sessionStorage.removeItem(DEPLOY_PENDING_KEY); }
     catch { /* Storage blocked: the waiting screen just won't survive a reload. */ }
   },
 };
+
+// Leave the waiting screen for the newly deployed site.
+function moveToSite(target: string) {
+  pending.set(false);
+  rememberDeployedSite(target);
+  window.location.assign(target);
+}
 
 // Whether this browser is signed in, and whether any provider has uploaded usage yet. Usage is only
 // read on a claimed deployment: no other step depends on it, and on a local copy it means parsing
@@ -104,25 +116,36 @@ export default function Setup() {
   const [storage, setStorage] = useState<StorageProviderId>(DEFAULT_STORAGE);
   // Deploy pressed: Vercel is open in another tab and this one waits for it to finish.
   const [deploying, setDeploying] = useState(false);
-  // The project name sent to Vercel, whose <name>.vercel.app address the waiting tab watches.
-  const [project, setProject] = useState<string | null>(null);
   // The waiting page keeps its fallbacks (reopen Vercel, type the address) out of the way until asked.
   const [stuck, setStuck] = useState(false);
   // This tab is the one Vercel sent back; the setup tab took over, so it only says so.
   const [handedOff, setHandedOff] = useState<string | null>(null);
   const { copied, copy } = useCopy();
 
+  // "Deploy a new copy instead" sets aside the site this copy already knows. It stays set aside
+  // (also while deploying), so only a newly linked or newly known site ends the wait.
+  const [setAside, setSetAside] = useState<string | null>(null);
+  const setAsideRef = useRef<string | null>(null);
+  const putAside = useCallback((site: string | null) => { setAsideRef.current = site; setSetAside(site); }, []);
+
   const load = useCallback(async () => {
     try {
       const next = await readState();
       setStatus(next.status);
+      // A deploy is over once this copy has a site (linked, or known) or is the deployed site itself.
+      if (next.status.cloud || next.status.site || (next.status.deployed && next.status.deployed !== setAsideRef.current)) {
+        pending.set(false);
+        setDeploying(false);
+        setStuck(false);
+        putAside(null);
+      }
       setSignedIn(next.signedIn);
       setHasData(next.hasData);
       setError("");
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
     }
-  }, []);
+  }, [putAside]);
 
   // Coming back from Vercel's deploy flow. If the setup tab is still open and waiting, hand over to
   // it (it moves on to the new site) and close this tab; otherwise carry on at the new site here.
@@ -149,13 +172,13 @@ export default function Setup() {
     }
     const timer = setTimeout(() => {
       setHere(window.location.origin);
-      const waitingFor = pending.get();
-      setDeploying(waitingFor !== null);
-      setProject(waitingFor);
+      const waiting = pending.get();
+      putAside(waiting?.before ?? null);
+      setDeploying(waiting !== null);
       void load();
     }, 0);
     return () => clearTimeout(timer);
-  }, [load]);
+  }, [load, putAside]);
 
   // The waiting tab: when Vercel's tab reports the new site, answer it and move on to that site.
   useEffect(() => {
@@ -171,34 +194,9 @@ export default function Setup() {
     return () => bus.close();
   }, [deploying]);
 
-  // The waiting tab also checks the new site's address itself, since Vercel may never send the
-  // user back. Until the deploy finishes that address answers 404 without CORS, so fetch throws.
-  const watched = deploying ? expectedSite(project) : null;
-  useEffect(() => {
-    if (!watched) return;
-    let stopped = false;
-    const check = async () => {
-      try {
-        const response = await fetch(`${watched}/api/setup/status`, { cache: "no-store" });
-        if (!stopped && response.ok && isDeployedStatus(await response.json())) moveToSite(`${watched}/setup`);
-      } catch { /* Not deployed yet. */ }
-    };
-    void check();
-    const timer = setInterval(() => void check(), DEPLOY_POLL_MS);
-    return () => { stopped = true; clearInterval(timer); };
-  }, [watched]);
-
-  function moveToSite(target: string) {
-    pending.set(false);
-    rememberDeployedSite(target);
-    window.location.assign(target);
-  }
   function startDeploy() {
-    // "Open Vercel again" keeps the same project name, so the tab keeps watching the same address.
-    const name = expectedSite(project) ? project! : newProjectName();
-    const link = deploymentUrl(undefined, { storage, project: name, redirect: `${window.location.origin}/setup` });
-    pending.set(name);
-    setProject(name);
+    const link = deploymentUrl(undefined, { storage, redirect: `${window.location.origin}/setup` });
+    pending.set({ before: setAsideRef.current });
     setDeploying(true);
     // A new tab keeps this one waiting. "noopener" keeps vercel.com from reaching back into this page.
     window.open(link, "_blank", "noopener");
@@ -206,12 +204,23 @@ export default function Setup() {
   function stopWaiting() {
     pending.set(false);
     setDeploying(false);
-    setProject(null);
     setStuck(false);
     setManual(null);
   }
 
-  const current = status ? setupStep(status, { signedIn, hasData, connecting }) : null;
+  // A set-aside site is treated as unknown, so setup offers a fresh deploy instead of reconnecting.
+  const shown = status && !status.cloud && setAside && status.deployed === setAside ? { ...status, deployed: null } : status;
+  const current = shown ? setupStep(shown, { signedIn, hasData, connecting }) : null;
+
+  // While waiting for a deploy, watch this computer rather than Vercel: Vercel may never send the user
+  // back, and the new site can have any name. The new site's connect command links this computer,
+  // after which the status names the site and the wizard moves on by itself.
+  const awaitingDeploy = deploying && current?.view === "deploy";
+  useEffect(() => {
+    if (!awaitingDeploy) return;
+    const timer = setInterval(() => void load(), POLL_MS);
+    return () => clearInterval(timer);
+  }, [awaitingDeploy, load]);
 
   // While the connect page is open, watch for the collector's first upload and move on by itself.
   const waiting = current?.view === "connect" && signedIn && !hasData;
@@ -314,17 +323,16 @@ export default function Setup() {
 
   if (current.view === "deploy" && deploying) {
     return (
-      <Step step={1} title="Waiting for your deployment" accent="deployment" lead="Finish deploying in the Vercel tab. When it’s done, this page moves on by itself.">
+      <Step step={1} title="Waiting for your deployment" accent="deployment" lead="Finish deploying in the Vercel tab. Then press Visit there and follow the steps on your new site. This page moves on once this computer is connected.">
         <p className={`live ${s.waiting}`} role="status">
-          <LoaderCircle className={s.spinner} size={22} aria-hidden="true" /> Waiting for Vercel…
+          <LoaderCircle className={s.spinner} size={22} aria-hidden="true" /> Waiting for this computer to connect…
         </p>
         {notice}
         {stuck ? (
           <>
             <button className="pill" onClick={startDeploy}>Open Vercel again <ExternalLink size={16} /></button>
             <p className={s.hint}>
-              When Vercel says your project is deployed, use its button to return here. If you left Vercel another way,
-              enter the address it gave your site:
+              Vercel shows your site’s address next to its Visit button. Enter it here to continue:
             </p>
             {siteForm}
           </>
@@ -373,7 +381,7 @@ export default function Setup() {
         <a className="pill pill-filled" href={new URL("/setup", site).href}>Open {host} <ExternalLink size={16} /></a>
         <p className={s.hint}>On a site that already has usage, choose “Connect another computer” to get the command.</p>
         {notice}
-        <button className={LINK} onClick={() => setStatus({ cloud: false, site: null, deployed: null })}>Deploy a new copy instead</button>
+        <button className={LINK} onClick={() => putAside(site)}>Deploy a new copy instead</button>
         <button className={LINK} onClick={() => { chooseLocalDashboard(); router.push("/"); }}>
           Visit dashboard on this computer
         </button>
@@ -391,7 +399,7 @@ export default function Setup() {
             </a>
           ))}
         </div>
-        <p className={s.hint}>Choose your vibe-check project when Vercel asks where to connect it. Another Redis or Postgres host works too: set REDIS_URL or DATABASE_URL yourself.</p>
+        <p className={s.hint}>Choose the project you just deployed when Vercel asks where to connect it. Another Redis or Postgres host works too: set REDIS_URL or DATABASE_URL yourself.</p>
         {notice}
         <button className={LINK} onClick={() => void load()}>I’ve done it, check again</button>
       </Step>
@@ -441,6 +449,11 @@ export default function Setup() {
             )}
             <p className={s.hint}>macOS or Linux, with Node.js 24 and git. Only usage totals are uploaded. The code expires in 15 minutes.{" "}
               <button className={LINK} onClick={() => void getCommand()} disabled={busy}>New code</button></p>
+            {/* People who began on their own computer's setup page left it waiting in another tab.
+                It moves on by itself once this command links that computer, whatever this site is called. */}
+            {status?.cloud && (
+              <p className={s.hint}>Started setup on your computer? Once the command finishes, switch back to that setup tab. It moves on by itself.</p>
+            )}
           </>
         ) : (
           <>

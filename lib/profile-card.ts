@@ -886,16 +886,16 @@ export const UPSTREAM_REPOSITORY = "https://github.com/darrellchee/vibe-check";
 // page can carry on at the new site.
 export function deploymentUrl(
   repository = UPSTREAM_REPOSITORY,
-  { redirect, storage, project = "vibe-check" }: { redirect?: string; storage?: StorageProviderId; project?: string } = {},
+  { redirect, storage }: { redirect?: string; storage?: StorageProviderId } = {},
 ) {
-  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(project)) throw new Error("Project names use lowercase letters, numbers and dashes.");
   const url = new URL(repository);
   if (url.origin !== "https://github.com" || !/^\/[\w.-]+\/[\w.-]+\/?$/.test(url.pathname) || url.search || url.hash || url.username || url.password)
     throw new Error("Enter a GitHub repository URL: https://github.com/owner/repo");
   const { integrationSlug, productSlug } = storageProvider(storage);
   const deploy = new URL("https://vercel.com/new/clone");
   deploy.searchParams.set("repository-url", url.href);
-  deploy.searchParams.set("project-name", project);
+  // Only a suggestion: people rename the project and repository freely, so nothing relies on it.
+  deploy.searchParams.set("project-name", "vibe-check");
   deploy.searchParams.set("repository-name", "vibe-check");
   deploy.searchParams.set("stores", JSON.stringify([
     { type: "integration", integrationSlug, productSlug, protocol: "storage", allowConnectExistingProduct: true },

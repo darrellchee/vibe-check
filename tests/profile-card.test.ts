@@ -43,10 +43,6 @@ test("deploy button sends the user back to setup only when asked", () => {
   assert.equal(new URL(deploymentUrl()).searchParams.has("redirect-url"), false);
   const deploy = deploymentUrl(undefined, { redirect: "http://localhost:3000/setup" });
   assert.equal(new URL(deploy).searchParams.get("redirect-url"), "http://localhost:3000/setup");
-  // Each deploy can name its project, so its <name>.vercel.app address is known in advance.
-  assert.equal(new URL(deploymentUrl()).searchParams.get("project-name"), "vibe-check");
-  assert.equal(new URL(deploymentUrl(undefined, { project: "vibe-check-ab12cd34" })).searchParams.get("project-name"), "vibe-check-ab12cd34");
-  for (const project of ["", "Vibe", "a b", "x.evil.com", "-lead"]) assert.throws(() => deploymentUrl(undefined, { project }));
   assert.ok(deploy.includes("redirect-url=http%3A%2F%2Flocalhost%3A3000%2Fsetup"));
 });
 
