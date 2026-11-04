@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { deployRedirectTarget, linkedSite, setupStep } from "../lib/setup-flow";
+import { deployRedirectTarget, expectedSite, isDeployedStatus, linkedSite, newProjectName, setupStep } from "../lib/setup-flow";
 import { setupState } from "../lib/instance";
 import type { SetupState } from "../lib/instance";
 
@@ -11,8 +11,10 @@ const ready = (claimed: boolean): SetupState => ({ cloud: true, storage: "ok", c
 const fresh = { signedIn: false, hasData: false, connecting: false };
 
 test("the wizard shows the step that matches what is already done", () => {
-  assert.deepEqual(setupStep({ cloud: false, site: null }, { ...fresh, signedIn: true, hasData: true }), { step: 1, view: "deploy" });
-  assert.deepEqual(setupStep({ cloud: false, site: "https://me.vercel.app" }, fresh), { step: 3, view: "publish" });
+  assert.deepEqual(setupStep({ cloud: false, site: null, deployed: null }, { ...fresh, signedIn: true, hasData: true }), { step: 1, view: "deploy" });
+  assert.deepEqual(setupStep({ cloud: false, site: "https://me.vercel.app", deployed: "https://me.vercel.app" }, fresh), { step: 3, view: "publish" });
+  // Unlinked, but a site was deployed: reconnect rather than deploy a second copy.
+  assert.deepEqual(setupStep({ cloud: false, site: null, deployed: "https://me.vercel.app" }, fresh), { step: 2, view: "reconnect" });
   assert.deepEqual(setupStep({ cloud: true, storage: "missing" }, fresh), { step: 1, view: "storage" });
   assert.deepEqual(setupStep({ cloud: true, storage: "error" }, fresh), { step: 1, view: "storage" });
   assert.deepEqual(setupStep(ready(false), fresh), { step: 2, view: "connect" });
@@ -42,15 +44,21 @@ test("a local copy counts as linked only once SYNC_URL names a public HTTPS site
 
 test("the setup status reports the linked site from SYNC_URL on a local copy", async () => {
   const env: Record<string, string | undefined> = process.env;
-  const before = { VIBE_CHECK_MODE: env.VIBE_CHECK_MODE, SYNC_URL: env.SYNC_URL, HOME: env.HOME };
+  const before = { VIBE_CHECK_MODE: env.VIBE_CHECK_MODE, SYNC_URL: env.SYNC_URL, HOME: env.HOME, DEPLOYED_SITE: env.DEPLOYED_SITE };
+  const cwd = process.cwd();
   try {
     env.HOME = await mkdtemp(path.join(tmpdir(), "vibe-check-empty-home-")); // No installed collector here.
+    process.chdir(env.HOME); // Nor any settings file.
     env.VIBE_CHECK_MODE = "local";
     delete env.SYNC_URL;
-    assert.deepEqual(await setupState(), { cloud: false, site: null });
+    delete env.DEPLOYED_SITE;
+    assert.deepEqual(await setupState(), { cloud: false, site: null, deployed: null });
+    env.DEPLOYED_SITE = "https://me.vercel.app"; // Unlinked, but the site is still known.
+    assert.deepEqual(await setupState(), { cloud: false, site: null, deployed: "https://me.vercel.app" });
     env.SYNC_URL = "https://me.vercel.app";
-    assert.deepEqual(await setupState(), { cloud: false, site: "https://me.vercel.app" });
+    assert.deepEqual(await setupState(), { cloud: false, site: "https://me.vercel.app", deployed: "https://me.vercel.app" });
   } finally {
+    process.chdir(cwd);
     for (const [k, v] of Object.entries(before)) if (v === undefined) delete env[k]; else env[k] = v;
   }
 });
@@ -72,4 +80,16 @@ test("tabs only hand over a deployed site that is a vercel.app setup page", asyn
   for (const bad of [null, "deployed", 42, {}, { type: "deployed" }, { type: "deployed", target: "https://evil.com/setup" },
     { type: "deployed", target: "javascript:alert(1)" }, { type: "other", target: "https://me.vercel.app" }])
     assert.equal(readDeployMessage(bad), null, JSON.stringify(bad));
+});
+
+test("the waiting tab watches the new project's own vercel.app address", () => {
+  const name = newProjectName();
+  assert.match(name, /^vibe-check-[a-z0-9]{8}$/);
+  assert.notEqual(newProjectName(), name); // A fresh name every deploy.
+  assert.equal(newProjectName(new Uint8Array([0, 1, 2, 3, 26, 27, 35, 36])), "vibe-check-abcd019a");
+  assert.equal(expectedSite(name), `https://${name}.vercel.app`);
+  for (const bad of [null, undefined, "", "1", "vibe-check", "vibe-check-ABCDEFGH", "vibe-check-abc.evil", "evil.com/vibe-check-abcdefgh"])
+    assert.equal(expectedSite(bad), null, String(bad));
+  assert.equal(isDeployedStatus({ cloud: true, storage: "missing" }), true);
+  for (const body of [null, "x", {}, { cloud: false, site: null }, { cloud: "true" }]) assert.equal(isDeployedStatus(body), false);
 });

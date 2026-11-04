@@ -1352,7 +1352,8 @@ button.heat-cell:is(:hover, :focus-visible) {
   .shell[data-motion] .panel:not([data-in]) .recharts-bar-rectangle path {
     transform: scaleY(0);
   }
-  .shell[data-motion] .panel[data-in] .recharts-bar-rectangle path {
+  /* Only before the panel settles: refreshes remount bars, which must not rise again. */
+  .shell[data-motion] .panel[data-in]:not([data-settled]) .recharts-bar-rectangle path {
     animation: rise-in 0.9s var(--ease-reveal) calc(0.25s + var(--i, 0) * 30ms) both;
   }
 

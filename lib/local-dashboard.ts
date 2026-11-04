@@ -5,3 +5,4 @@ import { LOCAL_DASHBOARD_COOKIE } from "./setup-flow";
 export function chooseLocalDashboard() {
   document.cookie = `${LOCAL_DASHBOARD_COOKIE}=1; path=/; SameSite=Lax`;
 }
+

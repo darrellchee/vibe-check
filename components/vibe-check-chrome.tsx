@@ -108,10 +108,22 @@ export function useReveal(root: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const el = root.current;
     if (!el) return;
+    // Once its entrance has played, a panel is marked settled. The chart library replaces a bar
+    // whenever its value or position changes (every refresh), and a replaced bar would otherwise
+    // replay its entrance keyframe; settled panels skip it.
+    const timers = new Set<number>();
+    const reveal = (node: HTMLElement) => {
+      node.dataset.in = "";
+      const t = window.setTimeout(() => {
+        timers.delete(t);
+        node.dataset.settled = "";
+      }, SETTLE_MS);
+      timers.add(t);
+    };
     const io = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
-        (entry.target as HTMLElement).dataset.in = "";
+        reveal(entry.target as HTMLElement);
         io.unobserve(entry.target);
       }
     }, { threshold: 0.1 });
@@ -128,15 +140,22 @@ export function useReveal(root: RefObject<HTMLElement | null>) {
     if (!el.hasAttribute("data-motion"))
       el.querySelectorAll<HTMLElement>("[data-reveal]:not([data-in])").forEach((node) => {
         const box = node.getBoundingClientRect();
-        if (box.top < window.innerHeight && box.bottom > 0) node.dataset.in = "";
+        if (box.top < window.innerHeight && box.bottom > 0) reveal(node);
       });
     scan();
     el.setAttribute("data-motion", "");
     const mo = new MutationObserver(scan);
     mo.observe(el, { childList: true, subtree: true });
-    return () => { io.disconnect(); mo.disconnect(); };
+    return () => {
+      io.disconnect();
+      mo.disconnect();
+      timers.forEach((t) => clearTimeout(t));
+    };
   }, [root]);
 }
+// Longest panel entrance (24 staggered bars: 0.25s delay + 23 × 30ms + 0.9s), with room for the
+// chart to draw a frame late.
+const SETTLE_MS = 2_500;
 
 // A formatted figure ("1.2B", "$88.61", "1,204") that counts up from zero the first time it
 // scrolls into view, then glides between values when a refresh changes it. Text that isn't a

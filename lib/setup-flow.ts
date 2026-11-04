@@ -4,7 +4,7 @@ import type { SetupState } from "./instance";
 // the browser already know, so a reload or a returning visitor always lands on the right page.
 export type SetupStep =
   | { step: 1; view: "deploy" | "storage" }
-  | { step: 2; view: "connect" | "sign-in" }
+  | { step: 2; view: "connect" | "sign-in" | "reconnect" }
   | { step: 3; view: "publish" };
 
 export const SETUP_STEPS = 3;
@@ -13,8 +13,13 @@ export function setupStep(
   status: SetupState,
   { signedIn, hasData, connecting }: { signedIn: boolean; hasData: boolean; connecting: boolean },
 ): SetupStep {
-  // A linked local copy has a deployed site and a collector already, so only publishing is left.
-  if (!status.cloud) return status.site ? { step: 3, view: "publish" } : { step: 1, view: "deploy" };
+  if (!status.cloud) {
+    // A linked local copy has a deployed site and a collector already, so only publishing is left.
+    if (status.site) return { step: 3, view: "publish" };
+    // Not linked, but a site was deployed (kept by an unlink or a finished deploy): offer to
+    // reconnect this computer to it rather than deploy a second copy.
+    return status.deployed ? { step: 2, view: "reconnect" } : { step: 1, view: "deploy" };
+  }
   if (status.storage !== "ok") return { step: 1, view: "storage" };
   if (!status.claimed) return { step: 2, view: "connect" };
   if (!signedIn) return { step: 2, view: "sign-in" };
@@ -63,6 +68,22 @@ export function deployRedirectTarget(value: string | null | undefined): string |
   const host = url.hostname.toLowerCase();
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.vercel\.app$/.test(host)) return null;
   return `https://${host}/setup`;
+}
+
+// Vercel does not always send the user back after deploying (it stays on its success page), so the
+// waiting tab also finds the new site itself. Each deploy gets its own project name, which Vercel
+// serves at <name>.vercel.app, and the tab checks that address until the new site answers.
+const PROJECT_PATTERN = /^vibe-check-[a-z0-9]{8}$/;
+export function newProjectName(bytes: Uint8Array = crypto.getRandomValues(new Uint8Array(8))) {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  return `vibe-check-${Array.from(bytes.slice(0, 8), (b) => alphabet[b % alphabet.length]).join("")}`;
+}
+export function expectedSite(project: string | null | undefined): string | null {
+  return project && PROJECT_PATTERN.test(project) ? `https://${project}.vercel.app` : null;
+}
+// The new site is up once its setup status answers as a deployed copy.
+export function isDeployedStatus(body: unknown): boolean {
+  return Boolean(body && typeof body === "object" && (body as { cloud?: unknown }).cloud === true);
 }
 
 // The deploy button opens Vercel in its own tab while the setup tab waits. When Vercel sends the

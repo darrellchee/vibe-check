@@ -65,6 +65,33 @@ export async function readLocalLink(where: Where = {}): Promise<LocalLink | null
   return site ? { site, root } : null;
 }
 
+// The deployed site this copy belongs to, even when this computer no longer uploads to it: the
+// linked site if there is one, else the address kept by an unlink or a finished deploy.
+const KNOWN_KEY = /^\s*(?:export\s+)?DEPLOYED_SITE\s*=/;
+export async function readKnownSite(where: Where = {}): Promise<string | null> {
+  const link = await readLocalLink(where);
+  if (link) return link.site;
+  const env = where.env ?? process.env;
+  const fromEnv = linkedSite(env.DEPLOYED_SITE);
+  if (fromEnv) return fromEnv;
+  const text = await readText(path.join(where.cwd ?? process.cwd(), ".env.local"));
+  return text ? linkedSite(parseEnv(text).DEPLOYED_SITE) : null;
+}
+
+// Keeps the deployed site's address (not a secret) in this checkout's settings. It never links
+// this computer: uploading still needs the connect command's SYNC_URL and SYNC_TOKEN.
+export async function rememberSite(value: string, where: Where = {}) {
+  const site = linkedSite(value);
+  if (!site) return null;
+  const file = path.join(where.cwd ?? process.cwd(), ".env.local");
+  const lines = ((await readText(file)) ?? "").split("\n").filter((line) => !KNOWN_KEY.test(line));
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
+  await writeFile(file, [...lines, `DEPLOYED_SITE=${site}`].join("\n") + "\n", { mode: 0o600 });
+  await chmod(file, 0o600);
+  (where.env ?? process.env).DEPLOYED_SITE = site;
+  return site;
+}
+
 async function stripEnvFile(file: string) {
   const text = await readText(file);
   if (text === null || !text.split("\n").some((line) => LINK_KEYS.test(line))) return;
@@ -81,6 +108,7 @@ export async function unlinkLocal(where: Where = {}) {
   const env = where.env ?? process.env;
   const root = await installedRoot(where);
   const run = where.run ?? runCommand;
+  const link = await readLocalLink(where);
   if (platform && root) {
     const file = serviceFile(platform, home);
     if (platform === "darwin") {
@@ -97,4 +125,6 @@ export async function unlinkLocal(where: Where = {}) {
     await stripEnvFile(path.join(dir, ".env.local"));
   delete env.SYNC_URL;
   delete env.SYNC_TOKEN;
+  // The site still exists, so setup offers to reconnect to it rather than deploy a second copy.
+  if (link) await rememberSite(link.site, where);
 }

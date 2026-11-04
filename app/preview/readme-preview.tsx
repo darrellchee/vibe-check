@@ -341,7 +341,7 @@ export default function ReadmePreview({ fontClass }: { fontClass: string }) {
                   <input id="readme-origin" className={p.field} type="url" placeholder="https://your-instance.vercel.app" value={origin}
                     aria-invalid={originInvalid} aria-describedby={originInvalid ? "readme-origin-error readme-origin-help" : "readme-origin-help"}
                     onChange={(ev) => { setOrigin(ev.target.value); edited(); }} />
-                  <button type="button" className={`pill pill-sm ${p.fit}`} onClick={() => { setOrigin(window.location.origin); edited(); }}>Use this website’s address</button>
+                  {!localCopy && <button type="button" className={`pill pill-sm ${p.fit}`} onClick={() => { setOrigin(window.location.origin); edited(); }}>Use this website’s address</button>}
                   {originInvalid && <p id="readme-origin-error" role="alert" className={`${p.help} ${p.error}`}>{output.originError}</p>}
                   <p id="readme-origin-help" className={p.help}>
                     {localCopy && output.originError

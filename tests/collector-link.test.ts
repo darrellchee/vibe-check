@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { collectorService, serviceFile } from "../scripts/collector-service-config";
-import { readLocalLink, serviceRoot, unlinkLocal, withoutLink } from "../lib/collector-link";
+import { readKnownSite, readLocalLink, rememberSite, serviceRoot, unlinkLocal, withoutLink } from "../lib/collector-link";
 import { POST as unlink } from "../app/api/setup/unlink/route";
 
 const SERVICE = { home: "/Users/me", node: "/usr/local/bin/node", loader: "file:///x/tsx.mjs", provider: "all" };
@@ -50,6 +50,20 @@ test("a clone finds the site through the installed collector, and unlinking stop
   await assert.rejects(stat(pc.file)); // Service definition removed.
   assert.equal(await readFile(path.join(pc.root, ".env.local"), "utf8"), "VIBE_CHECK_MODE=local\n");
   assert.equal(await readLocalLink(where), null);
+  // The site is still known afterwards, so setup offers to reconnect instead of deploying again.
+  assert.match(await readFile(path.join(pc.cwd, ".env.local"), "utf8"), /^DEPLOYED_SITE=https:\/\/me\.vercel\.app$/m);
+  assert.equal(await readKnownSite({ ...where, env: {} }), "https://me.vercel.app");
+});
+
+test("a deployed site is remembered without linking, and only as a public https origin", async () => {
+  const cwd = await mkdtemp(path.join(tmpdir(), "vibe-check-clone-"));
+  await writeFile(path.join(cwd, ".env.local"), "CURSOR_AUTO_SYNC=true\nDEPLOYED_SITE=https://old.vercel.app\n");
+  const where = { home: cwd, platform: "linux" as const, env: {} as Record<string, string | undefined>, cwd };
+  assert.equal(await rememberSite("http://me.vercel.app", where), null);
+  assert.equal(await rememberSite("https://me.vercel.app/setup", where), "https://me.vercel.app");
+  assert.equal(await readFile(path.join(cwd, ".env.local"), "utf8"), "CURSOR_AUTO_SYNC=true\nDEPLOYED_SITE=https://me.vercel.app\n");
+  assert.equal(await readLocalLink(where), null); // Remembering never makes this computer upload.
+  assert.equal(await readKnownSite({ ...where, env: {} }), "https://me.vercel.app");
 });
 
 test("an http or missing site never counts as linked", async () => {

@@ -2,28 +2,42 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Check, Copy, ExternalLink } from "lucide-react";
+import { ArrowRight, Check, Copy, ExternalLink, LoaderCircle } from "lucide-react";
 import { chooseLocalDashboard } from "@/lib/local-dashboard";
+import { Headline } from "@/components/vibe-check-chrome";
 import { hasHistory, loadHarnesses } from "@/lib/overview";
 import { deploymentUrl, profileEmbed } from "@/lib/profile-card";
-import { DEPLOY_CHANNEL, DEPLOY_PENDING_KEY, deployRedirectTarget, readDeployMessage, SETUP_STEPS, setupStep } from "@/lib/setup-flow";
+import { DEPLOY_CHANNEL, DEPLOY_PENDING_KEY, deployRedirectTarget, expectedSite, isDeployedStatus, newProjectName, readDeployMessage, SETUP_STEPS, setupStep } from "@/lib/setup-flow";
 import { DEFAULT_STORAGE, marketplaceUrl, STORAGE_PROVIDERS, type StorageProviderId } from "@/lib/storage-providers";
 import type { SetupState } from "@/lib/instance";
 import s from "./setup.module.css";
 
 type Connect = { code: string; origin: string; password?: string };
 const POLL_MS = 5_000;
+// Text-style buttons and links share the site-wide underlined link look.
+const LINK = "text-link";
+
+// Tells a local copy which site was just deployed, so its setup offers to reconnect to that site
+// later instead of deploying again. `keepalive` lets it finish while this tab moves to that site.
+const rememberDeployedSite = (site: string) => {
+  void fetch("/api/setup/site", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ site }), keepalive: true,
+  }).catch(() => undefined); // Only a local copy keeps it; a deployed site answers 404.
+};
 
 const installCommand = ({ origin, code }: Connect) => `curl -fsSL ${origin}/api/install | sh -s -- ${code}`;
 
 // How long the tab Vercel returns to waits for the setup tab to answer before moving on itself.
 const HANDOFF_MS = 800;
 const channel = () => (typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(DEPLOY_CHANNEL));
+// How often the waiting tab checks whether the new site is up.
+const DEPLOY_POLL_MS = 4_000;
 // "Waiting for your deployment" survives a reload of the setup tab, for this browser session only.
+// It holds the project name being deployed, so the tab keeps watching the same address.
 const pending = {
-  get: () => { try { return window.sessionStorage.getItem(DEPLOY_PENDING_KEY) === "1"; } catch { return false; } },
-  set: (on: boolean) => {
-    try { if (on) window.sessionStorage.setItem(DEPLOY_PENDING_KEY, "1"); else window.sessionStorage.removeItem(DEPLOY_PENDING_KEY); }
+  get: (): string | null => { try { return window.sessionStorage.getItem(DEPLOY_PENDING_KEY); } catch { return null; } },
+  set: (project: string | false) => {
+    try { if (project) window.sessionStorage.setItem(DEPLOY_PENDING_KEY, project); else window.sessionStorage.removeItem(DEPLOY_PENDING_KEY); }
     catch { /* Storage blocked: the waiting screen just won't survive a reload. */ }
   },
 };
@@ -57,7 +71,7 @@ function useCopy() {
   return { copied, copy };
 }
 
-function Step({ step, title, lead, children }: { step: number; title: string; lead: string; children?: ReactNode }) {
+function Step({ step, title, accent, lead, children }: { step: number; title: string; accent?: string; lead: string; children?: ReactNode }) {
   return (
     <main className={s.page}>
       <div className={s.top}>
@@ -67,7 +81,7 @@ function Step({ step, title, lead, children }: { step: number; title: string; le
         <span className={s.count}>{step}/{SETUP_STEPS}</span>
       </div>
       <section className={s.body}>
-        <h1 className={s.title}>{title}</h1>
+        <Headline text={title} accent={accent} />
         <p className={s.lead}>{lead}</p>
         {children}
       </section>
@@ -90,6 +104,10 @@ export default function Setup() {
   const [storage, setStorage] = useState<StorageProviderId>(DEFAULT_STORAGE);
   // Deploy pressed: Vercel is open in another tab and this one waits for it to finish.
   const [deploying, setDeploying] = useState(false);
+  // The project name sent to Vercel, whose <name>.vercel.app address the waiting tab watches.
+  const [project, setProject] = useState<string | null>(null);
+  // The waiting page keeps its fallbacks (reopen Vercel, type the address) out of the way until asked.
+  const [stuck, setStuck] = useState(false);
   // This tab is the one Vercel sent back; the setup tab took over, so it only says so.
   const [handedOff, setHandedOff] = useState<string | null>(null);
   const { copied, copy } = useCopy();
@@ -112,6 +130,7 @@ export default function Setup() {
     const target = deployRedirectTarget(new URLSearchParams(window.location.search).get("deployment-url"));
     if (target) {
       pending.set(false);
+      rememberDeployedSite(target);
       const bus = channel();
       if (!bus) {
         window.location.replace(target);
@@ -130,7 +149,9 @@ export default function Setup() {
     }
     const timer = setTimeout(() => {
       setHere(window.location.origin);
-      setDeploying(pending.get());
+      const waitingFor = pending.get();
+      setDeploying(waitingFor !== null);
+      setProject(waitingFor);
       void load();
     }, 0);
     return () => clearTimeout(timer);
@@ -145,15 +166,39 @@ export default function Setup() {
       const message = readDeployMessage(event.data);
       if (message?.type !== "deployed") return;
       bus.postMessage({ type: "taken" });
-      pending.set(false);
-      window.location.assign(message.target);
+      moveToSite(message.target);
     };
     return () => bus.close();
   }, [deploying]);
 
+  // The waiting tab also checks the new site's address itself, since Vercel may never send the
+  // user back. Until the deploy finishes that address answers 404 without CORS, so fetch throws.
+  const watched = deploying ? expectedSite(project) : null;
+  useEffect(() => {
+    if (!watched) return;
+    let stopped = false;
+    const check = async () => {
+      try {
+        const response = await fetch(`${watched}/api/setup/status`, { cache: "no-store" });
+        if (!stopped && response.ok && isDeployedStatus(await response.json())) moveToSite(`${watched}/setup`);
+      } catch { /* Not deployed yet. */ }
+    };
+    void check();
+    const timer = setInterval(() => void check(), DEPLOY_POLL_MS);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [watched]);
+
+  function moveToSite(target: string) {
+    pending.set(false);
+    rememberDeployedSite(target);
+    window.location.assign(target);
+  }
   function startDeploy() {
-    const link = deploymentUrl(undefined, { storage, redirect: `${window.location.origin}/setup` });
-    pending.set(true);
+    // "Open Vercel again" keeps the same project name, so the tab keeps watching the same address.
+    const name = expectedSite(project) ? project! : newProjectName();
+    const link = deploymentUrl(undefined, { storage, project: name, redirect: `${window.location.origin}/setup` });
+    pending.set(name);
+    setProject(name);
     setDeploying(true);
     // A new tab keeps this one waiting. "noopener" keeps vercel.com from reaching back into this page.
     window.open(link, "_blank", "noopener");
@@ -161,6 +206,8 @@ export default function Setup() {
   function stopWaiting() {
     pending.set(false);
     setDeploying(false);
+    setProject(null);
+    setStuck(false);
     setManual(null);
   }
 
@@ -234,23 +281,24 @@ export default function Setup() {
       return;
     }
     pending.set(false);
+    rememberDeployedSite(origin);
     // Another site entirely, so a full navigation rather than the client router.
     window.location.assign(new URL("/setup", origin).href);
   }
 
-  const notice = error ? <p className={s.error} role="alert">{error}</p> : null;
+  const notice = error ? <p className={`error-banner ${s.error}`} role="alert">{error}</p> : null;
   const siteForm = (
     <form className={s.inline} onSubmit={openSite}>
       <input className={s.input} value={manual ?? ""} onChange={(e) => { setManual(e.target.value); setError(""); }}
         placeholder="my-site.vercel.app" aria-label="Your deployed site address" inputMode="url" />
-      <button className={s.secondary} type="submit">Continue</button>
+      <button className="pill" type="submit">Continue</button>
     </form>
   );
 
   if (handedOff) {
     return (
-      <Step step={2} title="Your site is deployed" lead="Setup continues in your other tab. You can close this one.">
-        <a className={s.secondary} href={handedOff}>Continue here instead <ArrowRight size={16} /></a>
+      <Step step={2} title="Your site is deployed" accent="deployed" lead="Setup continues in your other tab. You can close this one.">
+        <a className="pill" href={handedOff}>Continue here instead <ArrowRight size={16} /></a>
       </Step>
     );
   }
@@ -259,32 +307,40 @@ export default function Setup() {
     return (
       <Step step={1} title="Setting up" lead="Checking your site…">
         {notice}
-        {error && <button className={s.link} onClick={() => void load()}>Try again</button>}
+        {error && <button className={LINK} onClick={() => void load()}>Try again</button>}
       </Step>
     );
   }
 
   if (current.view === "deploy" && deploying) {
     return (
-      <Step step={1} title="Waiting for your deployment" lead="Finish deploying in the Vercel tab. When it’s done, this page moves on by itself.">
-        <p className={s.waiting} role="status"><span className={s.pulse} aria-hidden="true" /> Waiting for Vercel…</p>
-        <button className={s.secondary} onClick={startDeploy}>Open Vercel again <ExternalLink size={16} /></button>
-        <p className={s.hint}>
-          When Vercel says your project is deployed, use its button to return here. If you left Vercel another way,
-          enter the address it gave your site:
+      <Step step={1} title="Waiting for your deployment" accent="deployment" lead="Finish deploying in the Vercel tab. When it’s done, this page moves on by itself.">
+        <p className={`live ${s.waiting}`} role="status">
+          <LoaderCircle className={s.spinner} size={22} aria-hidden="true" /> Waiting for Vercel…
         </p>
-        {siteForm}
         {notice}
-        <button className={s.link} onClick={stopWaiting}>Back</button>
+        {stuck ? (
+          <>
+            <button className="pill" onClick={startDeploy}>Open Vercel again <ExternalLink size={16} /></button>
+            <p className={s.hint}>
+              When Vercel says your project is deployed, use its button to return here. If you left Vercel another way,
+              enter the address it gave your site:
+            </p>
+            {siteForm}
+          </>
+        ) : (
+          <button className={LINK} onClick={() => setStuck(true)}>Page not moving on?</button>
+        )}
+        <button className={LINK} onClick={stopWaiting}>Back</button>
       </Step>
     );
   }
 
   if (current.view === "deploy") {
     return (
-      <Step step={1} title="Deploy your own copy" lead="Vercel copies this project to your GitHub and creates a free database. It takes about a minute.">
+      <Step step={1} title="Deploy your own copy" accent="own copy" lead="Vercel copies this project to your GitHub and creates a free database. It takes about a minute.">
         <fieldset className={s.choices}>
-          <legend className={s.secretLabel}>Database</legend>
+          <legend className={s.label}>Database</legend>
           {STORAGE_PROVIDERS.map((provider) => (
             <label key={provider.id} className={s.choice}>
               <input type="radio" name="storage" value={provider.id} checked={storage === provider.id}
@@ -294,15 +350,31 @@ export default function Setup() {
             </label>
           ))}
         </fieldset>
-        <button className={s.primary} onClick={startDeploy} disabled={!here}>
+        <button className="pill pill-filled" onClick={startDeploy} disabled={!here}>
           Deploy to Vercel <ExternalLink size={16} />
         </button>
         <p className={s.hint}>Used up a free plan already? Pick another, or connect a database you already have when Vercel asks.</p>
         {notice}
         {manual === null ? (
-          <button className={s.link} onClick={() => setManual("")}>Already deployed? Enter your site address</button>
+          <button className={LINK} onClick={() => setManual("")}>Already deployed? Enter your site address</button>
         ) : siteForm}
-        <button className={s.link} onClick={() => { chooseLocalDashboard(); router.push("/"); }}>
+        <button className={LINK} onClick={() => { chooseLocalDashboard(); router.push("/"); }}>
+          Visit dashboard on this computer
+        </button>
+      </Step>
+    );
+  }
+
+  if (current.view === "reconnect" && !status!.cloud && status!.deployed) {
+    const site = status!.deployed;
+    const host = new URL(site).host;
+    return (
+      <Step step={2} title="Reconnect this computer" accent="Reconnect" lead={`Your site ${host} is already deployed. Open it, sign in, and run its connect command on this computer to upload usage again.`}>
+        <a className="pill pill-filled" href={new URL("/setup", site).href}>Open {host} <ExternalLink size={16} /></a>
+        <p className={s.hint}>On a site that already has usage, choose “Connect another computer” to get the command.</p>
+        {notice}
+        <button className={LINK} onClick={() => setStatus({ cloud: false, site: null, deployed: null })}>Deploy a new copy instead</button>
+        <button className={LINK} onClick={() => { chooseLocalDashboard(); router.push("/"); }}>
           Visit dashboard on this computer
         </button>
       </Step>
@@ -311,28 +383,28 @@ export default function Setup() {
 
   if (current.view === "storage") {
     return (
-      <Step step={1} title="Connect your database" lead="Add any one of these free databases to this project in Vercel, then redeploy.">
+      <Step step={1} title="Connect your database" accent="database" lead="Add any one of these free databases to this project in Vercel, then redeploy.">
         <div className={s.providers}>
           {STORAGE_PROVIDERS.map((provider) => (
-            <a key={provider.id} className={s.secondary} href={marketplaceUrl(provider)} target="_blank" rel="noreferrer">
+            <a key={provider.id} className="pill" href={marketplaceUrl(provider)} target="_blank" rel="noreferrer">
               {provider.name} <ExternalLink size={14} />
             </a>
           ))}
         </div>
         <p className={s.hint}>Choose your vibe-check project when Vercel asks where to connect it. Another Redis or Postgres host works too: set REDIS_URL or DATABASE_URL yourself.</p>
         {notice}
-        <button className={s.link} onClick={() => void load()}>I’ve done it, check again</button>
+        <button className={LINK} onClick={() => void load()}>I’ve done it, check again</button>
       </Step>
     );
   }
 
   if (current.view === "sign-in") {
     return (
-      <Step step={2} title="Sign in to continue" lead="Enter the dashboard password you saved when you set up this site.">
+      <Step step={2} title="Sign in to continue" accent="Sign in" lead="Enter the dashboard password you saved when you set up this site.">
         <form className={s.inline} onSubmit={signIn}>
           <input className={s.input} type="password" autoComplete="current-password" value={password}
             onChange={(e) => setPassword(e.target.value)} placeholder="Dashboard password" aria-label="Dashboard password" autoFocus />
-          <button className={s.primary} type="submit" disabled={busy || !password}>{busy ? "Signing in…" : "Sign in"}</button>
+          <button className="pill pill-filled" type="submit" disabled={busy || !password}>{busy ? "Signing in…" : "Sign in"}</button>
         </form>
         {notice}
         <p className={s.hint}>Lost it? Delete the project in Vercel and deploy again.</p>
@@ -342,37 +414,37 @@ export default function Setup() {
 
   if (current.view === "connect") {
     return (
-      <Step step={2} title="Connect your computer" lead="Paste this command into a terminal on the computer you use for AI coding.">
+      <Step step={2} title="Connect your computer" accent="computer" lead="Paste this command into a terminal on the computer you use for AI coding.">
         {connect ? (
           <>
             <pre className={s.code}><code>{installCommand(connect)}</code></pre>
-            <button className={s.primary} onClick={() => void copy("command", installCommand(connect))}>
+            <button className="pill pill-filled" onClick={() => void copy("command", installCommand(connect))}>
               {copied === "command" ? <Check size={16} /> : <Copy size={16} />} {copied === "command" ? "Copied" : "Copy command"}
             </button>
             {connect.password && (
               <div className={s.secret}>
                 <div>
-                  <span className={s.secretLabel}>Password (save it)</span>
+                  <span className={s.label}>Password (save it)</span>
                   <code className={s.secretValue}>{connect.password}</code>
                   <span className={s.hint}>Needed to sign in after today or on another device. Shown only once.</span>
                 </div>
-                <button className={s.secondary} onClick={() => void copy("password", connect.password!)}>
+                <button className="pill" onClick={() => void copy("password", connect.password!)}>
                   {copied === "password" ? "Copied" : "Copy"}
                 </button>
               </div>
             )}
             {notice}
             {hasData ? (
-              <button className={s.link} onClick={() => { setConnecting(false); setConnect(null); }}>Done, continue to step 3</button>
+              <button className={LINK} onClick={() => { setConnecting(false); setConnect(null); }}>Done, continue to step 3</button>
             ) : (
-              <p className={s.waiting} role="status"><span className={s.pulse} aria-hidden="true" /> Waiting for your first upload… This page moves on by itself.</p>
+              <p className={`live ${s.waiting}`} role="status"><span className={s.pulse} aria-hidden="true" /> Waiting for your first upload… This page moves on by itself.</p>
             )}
             <p className={s.hint}>macOS or Linux, with Node.js 24 and git. Only usage totals are uploaded. The code expires in 15 minutes.{" "}
-              <button className={s.link} onClick={() => void getCommand()} disabled={busy}>New code</button></p>
+              <button className={LINK} onClick={() => void getCommand()} disabled={busy}>New code</button></p>
           </>
         ) : (
           <>
-            <button className={s.primary} onClick={() => void getCommand()} disabled={busy}>
+            <button className="pill pill-filled" onClick={() => void getCommand()} disabled={busy}>
               {busy ? "Preparing…" : "Get my command"}
             </button>
             {notice}
@@ -386,19 +458,19 @@ export default function Setup() {
   }
 
   return (
-    <Step step={3} title="Put it on your profile" lead="Preview your README with your real numbers, then publish it to GitHub.">
-      <Link className={s.primary} href="/edit">Open README editor <ArrowRight size={16} /></Link>
+    <Step step={3} title="Put it on your profile" accent="profile" lead="Preview your README with your real numbers, then publish it to GitHub.">
+      <Link className="pill pill-filled" href="/edit">Open README editor <ArrowRight size={16} /></Link>
       {notice}
       <p className={s.hint}>
         {status?.cloud ? (
           <>
-            <button className={s.link} onClick={() => { setConnecting(true); setConnect(null); }}>Connect another computer</button>
+            <button className={LINK} onClick={() => { setConnecting(true); setConnect(null); }}>Connect another computer</button>
             {" · "}
-            <Link className={s.link} href="/all">Open dashboard</Link>
+            <Link className={LINK} href="/all">Open dashboard</Link>
           </>
         ) : status?.site ? (
           // The dashboard is only viewed on the deployed site.
-          <a className={s.link} href={`${status.site}/all`}>Open your dashboard ↗</a>
+          <a className={LINK} href={`${status.site}/all`}>Open your dashboard ↗</a>
         ) : null}
       </p>
     </Step>
